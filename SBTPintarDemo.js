@@ -145,6 +145,7 @@ const KATEGORI_PENGELUARAN_LIST = Object.keys(KATEGORI_PENGELUARAN);
 // ============================================================
 const SALDO_AWAL_KAS = 6800000;
 const IPL_PER_BULAN = 200000;
+const REKENING_IPL = { bank: "Bank BCA", nomor: "1234567890", atasNama: "Bendahara" };
 const BUKTI_CONTOH = "https://images.unsplash.com/photo-1554224155-6726b3ff858f?w=200&q=60";
 
 const namaBlokTambahan = [
@@ -1316,8 +1317,24 @@ function IuranCellModal({ data, canVerifikasi, onClose, onVerifikasi, onBatalkan
   const totalTunggakan = semuaBulanMenunggak.length * w.iplPerBulan;
   const daftarBulanMenunggak = semuaBulanMenunggak.map(monthLabel).join(", ");
 
-  const waTextSatuBulan = `Halo Bpk/Ibu ${w.nama}, mengingatkan iuran IPL ${monthLabel(monthKey)} sebesar ${formatRp(w.iplPerBulan)} belum kami terima. Mohon dapat diselesaikan, terima kasih 🙏 — Pengurus RT`;
-  const waTextSemua = `Halo Bpk/Ibu ${w.nama}, mengingatkan iuran IPL yang masih tertunggak selama ${semuaBulanMenunggak.length} bulan (${daftarBulanMenunggak}) dengan total ${formatRp(totalTunggakan)}. Mohon dapat diselesaikan, terima kasih 🙏 — Pengurus RT`;
+  const waTextSatuBulan = `Assalamualaikum Bpk/Ibu ${w.nama},
+mengingatkan iuran IPL ${monthLabel(monthKey)} sebesar ${formatRp(w.iplPerBulan)} belum kami terima.
+Mohon dapat diselesaikan.
+
+${REKENING_IPL.bank}
+${REKENING_IPL.nomor}
+an ${REKENING_IPL.atasNama}
+
+Terima kasih, 🙏 — Pengurus.`;
+  const waTextSemua = `Assalamualaikum Bpk/Ibu ${w.nama},
+mengingatkan iuran IPL yang masih tertunggak selama ${semuaBulanMenunggak.length} bulan (${daftarBulanMenunggak}) dengan total ${formatRp(totalTunggakan)} belum kami terima.
+Mohon dapat diselesaikan.
+
+${REKENING_IPL.bank}
+${REKENING_IPL.nomor}
+an ${REKENING_IPL.atasNama}
+
+Terima kasih, 🙏 — Pengurus.`;
 
   return (
     <div style={{ position: "fixed", inset: 0, background: "rgba(29,29,31,0.5)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 80, padding: 16 }}>
