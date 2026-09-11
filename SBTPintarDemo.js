@@ -157,7 +157,7 @@ const namaBlokTambahan = [
   ["Yudi Kurnia", "I1"], ["Tuti Sundari", "I2"], ["Arif Rahman", "I3"], ["Melati Putri", "I4"],
 ];
 const namaBlokInti = [
-  ["Budi Santoso", "A1"], ["Siti Rahma", "A2"], ["Agus Wijaya", "A3"], ["Dewi Lestari", "A4"],
+  ["Bani", "A1"], ["Deri", "A2"], ["Agus Wijaya", "A3"], ["Dewi Lestari", "A4"],
   ["Hendra Gunawan", "B1"], ["Rina Marlina", "B2"], ["Joko Prasetyo", "B3"], ["Nur Aini", "B4"],
 ];
 const semuaNamaBlok = [...namaBlokInti, ...namaBlokTambahan]; // total 36 warga
@@ -185,33 +185,28 @@ const seedWarga = semuaNamaBlok.map(([nama, blok], i) => {
   };
 });
 
-// ============================================================
-// ⚠️ OVERRIDE UNTUK INTERNAL TEST — isi nomor HP ASLI di sini saja.
-// JANGAN commit/push file ini ke GitHub publik & JANGAN kirim balik
-// ke chat Claude kalau sudah diisi nomor asli.
-// Format: diawali "0" seperti nomor HP Indonesia biasa (bukan +62).
-// ============================================================
-// seedWarga[0].hp = "08xxxxxxxxxx"; // ganti jadi nomor warga test #1 (nama: Budi Santoso, Blok A1)
-// seedWarga[1].hp = "08xxxxxxxxxx"; // ganti jadi nomor warga test #2 (nama: Siti Rahma, Blok A2)
+// nomor HP asli untuk 2 warga teratas — dipakai untuk tes notifikasi reminder WA
+seedWarga[0].hp = "08111666724"; // Bani, Blok A1
+seedWarga[1].hp = "082112578429"; // Deri, Blok A2
 
 const seedKegiatan = [
   {
     id: "k1", tipe: "Kegiatan", tanggal: `${recentMonths[0]}-07`,
     judul: "Kerja Bakti Bulanan & Gotong Royong Saluran Air",
     isi: "Kerja bakti rutin membersihkan saluran air dan area taman cluster, diikuti sekitar 20 KK. Fokus utama pembersihan got depan Blok A dan B, serta pengecatan ulang pos satpam. Konsumsi disediakan dari kas warga.",
-    diajukanOleh: "Pak Chandra",
+    diajukanOleh: "Pak Ridwan",
   },
   {
     id: "k2", tipe: "Notulensi", tanggal: `${recentMonths[0]}-14`,
     judul: "Notulensi Rapat Warga Bulanan",
-    isi: "- Laporan keuangan bulan berjalan disetujui warga\n- Usulan penambahan CCTV di pintu masuk cluster akan disurvei biayanya oleh Pak Feri\n- Rencana HUT RI disepakati minggu ketiga Agustus\n- Warga diimbau segera melunasi IPL yang tertunggak lewat fitur Bayar IPL di aplikasi",
-    diajukanOleh: "Pak Hafiz",
+    isi: "- Laporan keuangan bulan berjalan disetujui warga\n- Usulan penambahan CCTV di pintu masuk cluster akan disurvei biayanya oleh Pak Anwar\n- Rencana HUT RI disepakati minggu ketiga Agustus\n- Warga diimbau segera melunasi IPL yang tertunggak lewat fitur Bayar IPL di aplikasi",
+    diajukanOleh: "Pak Surya",
   },
   {
     id: "k3", tipe: "Kegiatan", tanggal: todayISO(),
     judul: "Rencana Nonton Bareng 17 Agustusan di Lapangan Cluster",
     isi: "Pengurus berencana mengadakan nonton bareng & lomba kecil menyambut 17 Agustus di lapangan tengah cluster. Anggaran konsumsi akan diambil dari kas kegiatan.",
-    diajukanOleh: "Pak Chandra",
+    diajukanOleh: "Pak Ridwan",
   },
 ];
 
@@ -279,10 +274,11 @@ const seedTransaksi = [
 ];
 
 const pengurus = [
-  { nama: "Pak Chandra", jabatan: "Ketua RT", hp: "081210000001" }, // 🔧 TEST: ganti hp ini jadi nomor asli HP pengurus untuk uji coba
-  { nama: "Pak Hafiz", jabatan: "Sekretaris", hp: "081210000002" },
-  { nama: "Pak Yani", jabatan: "Bendahara", hp: "081210000003" },
-  { nama: "Pak Feri", jabatan: "Keamanan", hp: "081210000004" },
+  { nama: "Pak Ridwan", jabatan: "Ketua", hp: "081210000001" },
+  { nama: "Pak Surya", jabatan: "Sekretaris", hp: "081210000002" },
+  { nama: "Pak Bayu", jabatan: "Bendahara", hp: "081210000003" },
+  { nama: "Pak Anwar", jabatan: "Keamanan", hp: "081210000004" },
+  { nama: "Pak Doni", jabatan: "EO & Dokumentasi", hp: "081210000005" },
 ];
 const security = [
   { nama: "Pak Sandi", jabatan: "Security", hp: "081220000001" },
@@ -300,10 +296,11 @@ const kontakEksternal = [
 
 const seedPengguna = [
   { id: "u1", nama: "Admin Sistem", hp: "081200000000", role: "admin" },
-  { id: "u2", nama: "Pak Chandra", hp: "081210000001", role: "pengurus" },
-  { id: "u3", nama: "Pak Hafiz", hp: "081210000002", role: "pengurus" },
-  { id: "u4", nama: "Pak Yani", hp: "081210000003", role: "pengurus" },
-  { id: "u5", nama: "Pak Feri", hp: "081210000004", role: "pengurus" },
+  { id: "u2", nama: "Pak Ridwan", hp: "081210000001", role: "pengurus" },
+  { id: "u3", nama: "Pak Surya", hp: "081210000002", role: "pengurus" },
+  { id: "u4", nama: "Pak Bayu", hp: "081210000003", role: "pengurus" },
+  { id: "u5", nama: "Pak Anwar", hp: "081210000004", role: "pengurus" },
+  { id: "u5b", nama: "Pak Doni", hp: "081210000005", role: "pengurus" },
   { id: "u6", nama: "Pak Sandi", hp: "081220000001", role: "security" },
   { id: "u7", nama: "Pak Fajar", hp: "081220000002", role: "security" },
   { id: "u8", nama: "Pak Ferial", hp: "081220000003", role: "security" },
@@ -317,7 +314,7 @@ const ALARM_STATUS = ["Baru", "Diproses", "Selesai"];
 
 const seedAlarmLog = [
   { id: "al1", tanggal: `${recentMonths[0]}-02`, waktu: "21:14:03", pelapor: "Rina Marlina", issue: "Keamanan / Mencurigakan — ada orang tidak dikenal mondar-mandir di depan Blok B", status: "Selesai", ditanganiOleh: "Pak Sandi" },
-  { id: "al2", tanggal: `${recentMonths[0]}-06`, waktu: "05:47:21", pelapor: "Agus Wijaya", issue: "Medis / Kesehatan — anak demam tinggi, minta rekomendasi ke Puskesmas terdekat", status: "Selesai", ditanganiOleh: "Pak Chandra" },
+  { id: "al2", tanggal: `${recentMonths[0]}-06`, waktu: "05:47:21", pelapor: "Agus Wijaya", issue: "Medis / Kesehatan — anak demam tinggi, minta rekomendasi ke Puskesmas terdekat", status: "Selesai", ditanganiOleh: "Pak Ridwan" },
   { id: "al3", tanggal: `${recentMonths[0]}-13`, waktu: "23:02:55", pelapor: "Dewi Lestari", issue: "Keamanan / Mencurigakan — suara benda jatuh dari arah pagar belakang Blok A", status: "Diproses", ditanganiOleh: "Pak Fajar" },
   { id: "al4", tanggal: `${recentMonths[1]}-27`, waktu: "14:20:10", pelapor: "Hendra Gunawan", issue: "Konflik Warga — keributan kecil terkait parkir motor", status: "Diproses", ditanganiOleh: null },
   { id: "al5", tanggal: todayISO(), waktu: "07:38:44", pelapor: "Siti Rahma", issue: "Lainnya — pohon tumbang menutup jalan depan Blok C", status: "Baru", ditanganiOleh: null },
@@ -1320,7 +1317,7 @@ function IuranCellModal({ data, canVerifikasi, onClose, onVerifikasi, onBatalkan
   const daftarBulanMenunggak = semuaBulanMenunggak.map(monthLabel).join(", ");
 
   const waTextSatuBulan = `Halo Bpk/Ibu ${w.nama}, mengingatkan iuran IPL ${monthLabel(monthKey)} sebesar ${formatRp(w.iplPerBulan)} belum kami terima. Mohon dapat diselesaikan, terima kasih 🙏 — Pengurus RT`;
-  const waTextSemua = `Halo Bpk/Ibu ${w.nama}, mengingatkan iuran IPL yang masih tertunggak selama ${semuaBulanMenunggak.length} bulan (${daftarBulanMenunggak}) dengan total ${formatRp(totalTunggakan)}. Mohon dapat diselesaikan sekaligus, terima kasih 🙏 — Pengurus RT`;
+  const waTextSemua = `Halo Bpk/Ibu ${w.nama}, mengingatkan iuran IPL yang masih tertunggak selama ${semuaBulanMenunggak.length} bulan (${daftarBulanMenunggak}) dengan total ${formatRp(totalTunggakan)}. Mohon dapat diselesaikan, terima kasih 🙏 — Pengurus RT`;
 
   return (
     <div style={{ position: "fixed", inset: 0, background: "rgba(29,29,31,0.5)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 80, padding: 16 }}>
