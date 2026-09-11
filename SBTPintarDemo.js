@@ -358,7 +358,7 @@ function alarmStatusColor(status) {
 // ============================================================
 // storage
 // ============================================================
-const KEYS = { warga: "sbt:warga:v3", transaksi: "sbt:transaksi:v3", kegiatan: "sbt:kegiatan:v3", alarm: "sbt:alarmlog:v4", pengguna: "sbt:pengguna:v3", absensi: "sbt:absensi:v1" };
+const KEYS = { warga: "sbt:warga:v4", transaksi: "sbt:transaksi:v3", kegiatan: "sbt:kegiatan:v3", alarm: "sbt:alarmlog:v4", pengguna: "sbt:pengguna:v4", absensi: "sbt:absensi:v1" };
 async function loadKey(key, fallback) {
   try {
     if (typeof window !== "undefined" && window.storage) {
