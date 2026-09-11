@@ -4,7 +4,7 @@ import React, { useState, useEffect, useMemo, useCallback, useRef } from "react"
 import {
   LayoutDashboard, Wallet, CalendarDays, FileText, Siren,
   Phone, MessageCircle, Plus, X, Printer, ShieldCheck, Upload,
-  UserCog, CheckCircle2, Clock, AlertTriangle, XCircle, Send, ImageIcon, Pencil,
+  UserCog, CheckCircle2, Clock, AlertTriangle, XCircle, Send, ImageIcon, Pencil, ClipboardCheck, Info,
 } from "lucide-react";
 
 // ============================================================
@@ -60,6 +60,35 @@ function ContentBlocks({ text, style }) {
     </div>
   );
 }
+
+// ---------- absensi security: helper tanggal & grid kalender ----------
+function toLocalISODate(d) {
+  return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
+}
+function dayLabelShort(iso) {
+  const [y, m, d] = iso.split("-").map(Number);
+  const dt = new Date(y, m - 1, d);
+  const hari = ["Min", "Sen", "Sel", "Rab", "Kam", "Jum", "Sab"];
+  const bulan = ["Jan", "Feb", "Mar", "Apr", "Mei", "Jun", "Jul", "Agu", "Sep", "Okt", "Nov", "Des"];
+  return `${hari[dt.getDay()]}, ${dt.getDate()} ${bulan[dt.getMonth()]} ${y}`;
+}
+function buildCalendarGrid(days = 30) {
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const earliest = new Date(today);
+  earliest.setDate(earliest.getDate() - (days - 1));
+  const gridStart = new Date(earliest);
+  gridStart.setDate(gridStart.getDate() - gridStart.getDay());
+  const cells = [];
+  for (let i = 0; i < 35; i++) {
+    const d = new Date(gridStart);
+    d.setDate(d.getDate() + i);
+    const dayOffset = Math.round((today - d) / 86400000);
+    cells.push({ iso: toLocalISODate(d), tanggalNum: d.getDate(), dayOffset, inRange: dayOffset >= 0 && dayOffset < days, isToday: dayOffset === 0 });
+  }
+  return cells;
+}
+
 
 const now = new Date();
 const currentMonthKey = `${now.getFullYear()}-${pad2(now.getMonth() + 1)}`;
@@ -186,6 +215,42 @@ const seedKegiatan = [
   },
 ];
 
+// ---------- data contoh absensi security (30 hari terakhir) ----------
+// petugas pagi & malam bergantian antar 3 orang security, mayoritas "Aman
+// Terkendali", beberapa "Ada Gangguan", beberapa sengaja kosong (belum lapor)
+const ABSENSI_KEJADIAN = [
+  { back: 10, shift: "malam", keterangan: "Ada suara mencurigakan dari arah pagar belakang Blok C sekitar jam 23.30, sudah dicek keliling, tidak ditemukan orang." },
+  { back: 23, shift: "malam", keterangan: "Keributan kecil antar warga di area parkir, sudah dilerai dan diarahkan ke pengurus." },
+  { back: 18, shift: "pagi", keterangan: "Kendaraan tidak dikenal parkir lama di depan pos, sudah ditanya dan sudah pergi." },
+];
+const ABSENSI_KOSONG_OFFSET = new Set([2, 15]); // hari ini dianggap belum lapor untuk kedua shift
+
+const seedAbsensiSecurity = (() => {
+  const list = [];
+  const namaSecurityByShift = { pagi: "Pak Sandi", malam: "Pak Fajar" };
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  for (let back = 0; back < 30; back++) {
+    if (ABSENSI_KOSONG_OFFSET.has(back)) continue; // sengaja tidak dibuat -> "belum lapor"
+    const d = new Date(today);
+    d.setDate(d.getDate() - back);
+    const iso = toLocalISODate(d);
+    ["pagi", "malam"].forEach((shift) => {
+      const kejadian = ABSENSI_KEJADIAN.find((k) => k.back === back && k.shift === shift);
+      list.push({
+        id: `abs-${iso}-${shift}`,
+        tanggal: iso,
+        shift,
+        petugasNama: namaSecurityByShift[shift],
+        kondisi: kejadian ? "Ada Gangguan" : "Aman Terkendali",
+        keterangan: kejadian ? kejadian.keterangan : "",
+        waktuLapor: shift === "pagi" ? "07:00" : "19:00",
+      });
+    });
+  }
+  return list;
+})();
+
 // transaksi pemasukan dibangkitkan dari status IPL "lunas" pada 3 bulan terakhir saja
 // (selaras dengan cakupan dropdown bulan di menu Laporan)
 const seedPemasukanDariIuran = seedWarga.flatMap((w) =>
@@ -296,7 +361,7 @@ function alarmStatusColor(status) {
 // ============================================================
 // storage
 // ============================================================
-const KEYS = { warga: "sbt:warga:v3", transaksi: "sbt:transaksi:v3", kegiatan: "sbt:kegiatan:v3", alarm: "sbt:alarmlog:v4", pengguna: "sbt:pengguna:v3" };
+const KEYS = { warga: "sbt:warga:v3", transaksi: "sbt:transaksi:v3", kegiatan: "sbt:kegiatan:v3", alarm: "sbt:alarmlog:v4", pengguna: "sbt:pengguna:v3", absensi: "sbt:absensi:v1" };
 async function loadKey(key, fallback) {
   try {
     if (typeof window !== "undefined" && window.storage) {
@@ -422,10 +487,17 @@ export default function SBTPintar() {
   const [transaksi, setTransaksi] = useState(seedTransaksi);
   const [kegiatan, setKegiatan] = useState(seedKegiatan);
   const [alarmLog, setAlarmLog] = useState(seedAlarmLog);
+  const [absensiSecurity, setAbsensiSecurity] = useState(seedAbsensiSecurity);
   const [pengguna, setPengguna] = useState(seedPengguna);
   const [loggedInUser, setLoggedInUser] = useState(null);
   const role = loggedInUser?.role || null;
   const namaAktif = loggedInUser?.nama || "";
+
+  useEffect(() => {
+    if (role === "security" && ["dashboard", "laporan", "iuran"].includes(tab)) {
+      setTab("kegiatan");
+    }
+  }, [role, tab]);
   const [laporanBulan, setLaporanBulan] = useState(currentMonthKey);
   const [showExpenseForm, setShowExpenseForm] = useState(false);
   const [showKegiatanForm, setShowKegiatanForm] = useState(false);
@@ -448,15 +520,17 @@ export default function SBTPintar() {
     document.head.appendChild(link);
 
     (async () => {
-      const [w, t, k, a, p] = await Promise.all([
+      const [w, t, k, a, p, abs] = await Promise.all([
         loadKey(KEYS.warga, null), loadKey(KEYS.transaksi, null),
         loadKey(KEYS.kegiatan, null), loadKey(KEYS.alarm, null), loadKey(KEYS.pengguna, null),
+        loadKey(KEYS.absensi, null),
       ]);
       if (w) setWarga(w); else saveKey(KEYS.warga, seedWarga);
       if (t) setTransaksi(t); else saveKey(KEYS.transaksi, seedTransaksi);
       if (k) setKegiatan(k); else saveKey(KEYS.kegiatan, seedKegiatan);
       if (a) setAlarmLog(a); else saveKey(KEYS.alarm, seedAlarmLog);
       if (p) setPengguna(p); else saveKey(KEYS.pengguna, seedPengguna);
+      if (abs) setAbsensiSecurity(abs); else saveKey(KEYS.absensi, seedAbsensiSecurity);
       setLoading(false);
     })();
   }, []);
@@ -590,6 +664,16 @@ export default function SBTPintar() {
     });
   };
 
+  // ---- Absensi Security ----
+  const addAbsensiLaporan = (data) => {
+    setAbsensiSecurity((prev) => {
+      const next = [...prev, { id: uid(), ...data, petugasNama: namaAktif, waktuLapor: new Date().toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit" }) }];
+      saveKey(KEYS.absensi, next);
+      return next;
+    });
+    setToast("Laporan jaga tersimpan.");
+  };
+
   // ---- Akses pengguna ----
   const updatePenggunaRole = (id, newRole) => {
     setPengguna((prev) => { const next = prev.map((p) => p.id === id ? { ...p, role: newRole } : p); saveKey(KEYS.pengguna, next); return next; });
@@ -641,11 +725,12 @@ export default function SBTPintar() {
   const jumlahMenunggu = warga.filter((w) => w.statusBayar[currentMonthKey]?.status === "menunggu").length;
 
   const tabs = [
-    { id: "dashboard", label: "Ringkasan", icon: LayoutDashboard },
-    { id: "laporan", label: "Laporan", icon: FileText },
-    { id: "iuran", label: "Iuran IPL", icon: Wallet },
+    ...(role !== "security" ? [{ id: "dashboard", label: "Ringkasan", icon: LayoutDashboard }] : []),
+    ...(role !== "security" ? [{ id: "laporan", label: "Laporan", icon: FileText }] : []),
+    ...(role !== "security" ? [{ id: "iuran", label: "Iuran IPL", icon: Wallet }] : []),
     { id: "kegiatan", label: "Kegiatan", icon: CalendarDays },
     { id: "darurat", label: "Kontak Darurat", icon: Siren },
+    { id: "absensi", label: "Absensi Security", icon: ClipboardCheck },
     ...(canKelolaAkses(role) ? [{ id: "akses", label: "Akses", icon: UserCog }] : []),
   ];
 
@@ -673,8 +758,8 @@ export default function SBTPintar() {
         .panic-btn.armed { transform: translateX(-50%) scale(1.12) translateZ(0); -webkit-transform: translateX(-50%) scale(1.12) translateZ(0); box-shadow: 0 0 0 9px rgba(214,64,46,0.18), 0 8px 22px rgba(214,64,46,0.4); }
         .panic-hint { position: fixed; left: 50%; transform: translateX(-50%); bottom: 98px; z-index: 60; background: ${COLORS.ink}; color: #fff; font-size: 12px; padding: 6px 12px; border-radius: 999px; white-space: nowrap; }
         @media (max-width: 760px) { .panic-hint { bottom: 150px; } }
-        .pay-ipl-btn { position: fixed; right: 22px; bottom: 24px; z-index: 55; -webkit-transform: translateZ(0); transform: translateZ(0); }
-        @media (max-width: 760px) { .pay-ipl-btn { right: 16px; bottom: 78px; } }
+        .fab-btn { position: fixed; right: 22px; bottom: 24px; z-index: 55; -webkit-transform: translateZ(0); transform: translateZ(0); }
+        @media (max-width: 760px) { .fab-btn { right: 16px; bottom: 78px; } }
         .print-only { display: none; }
         @media print {
           .no-print { display: none !important; }
@@ -1011,6 +1096,15 @@ export default function SBTPintar() {
             </>
           )}
 
+          {tab === "absensi" && (
+            <AbsensiSecurityView
+              absensiSecurity={absensiSecurity}
+              role={role}
+              namaAktif={namaAktif}
+              onSubmit={addAbsensiLaporan}
+            />
+          )}
+
           {tab === "akses" && canKelolaAkses(role) && (
             <>
               <SectionTitle title="Kelola Akses Pengguna" action={<Btn onClick={() => setShowAddUser(!showAddUser)}><Plus size={15} /> Tambah Pengguna</Btn>} />
@@ -1122,7 +1216,7 @@ function WargaIuranView({ myWarga, onOpenPay }) {
       </Card>
 
       {belumCount > 0 && (
-        <div className="pay-ipl-btn">
+        <div className="fab-btn">
           <Btn pill onClick={onOpenPay} style={{ boxShadow: "0 10px 24px rgba(0,113,227,0.35)", fontSize: 15, padding: "13px 22px" }}>
             <Wallet size={16} /> Bayar IPL
           </Btn>
@@ -1291,6 +1385,197 @@ function IuranCellModal({ data, canVerifikasi, onClose, onVerifikasi, onBatalkan
         </div>
       </Card>
     </div>
+  );
+}
+
+// ============================================================
+// Absensi Security — kalender interaktif + daftar laporan jaga
+// ============================================================
+const KONDISI_ABSENSI = ["Aman Terkendali", "Ada Gangguan"];
+
+function StripStatus({ entry }) {
+  let bg = COLORS.inkFaint; // belum lapor
+  if (entry) bg = entry.kondisi === "Ada Gangguan" ? COLORS.danger : COLORS.success;
+  return <div style={{ flex: 1, height: 6, borderRadius: 2, background: bg }} />;
+}
+
+function AbsensiCard({ iso, shift, entry }) {
+  const shiftLabel = shift === "pagi" ? "Pagi" : "Malam";
+  if (!entry) {
+    return (
+      <Card style={{ padding: 16, marginBottom: 10 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 7, fontSize: 13, color: COLORS.inkFaint }}>
+          <AlertTriangle size={14} />
+          {dayLabelShort(iso)} · Shift {shiftLabel} — belum ada laporan masuk.
+        </div>
+      </Card>
+    );
+  }
+  const isGangguan = entry.kondisi === "Ada Gangguan";
+  return (
+    <Card style={{ padding: 16, marginBottom: 10 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8, flexWrap: "wrap", gap: 6 }}>
+        <span style={{ fontSize: 12, color: COLORS.inkSoft }}>{dayLabelShort(iso)} · Shift {shiftLabel} · {entry.waktuLapor}</span>
+        <span style={{ display: "inline-flex", alignItems: "center", gap: 4, padding: "3px 10px", borderRadius: 999, fontSize: 11.5, fontWeight: 700, background: isGangguan ? COLORS.dangerSoft : COLORS.successSoft, color: isGangguan ? COLORS.danger : COLORS.success }}>
+          {isGangguan ? <AlertTriangle size={12} /> : <CheckCircle2 size={12} />}
+          {entry.kondisi}
+        </span>
+      </div>
+      <div style={{ fontWeight: 600, fontSize: 13.5 }}>{entry.petugasNama}</div>
+      {entry.keterangan && (
+        <div style={{ marginTop: 10, paddingTop: 10, borderTop: `1px solid ${COLORS.divider}` }}>
+          <div style={{ fontSize: 11, color: COLORS.inkFaint, marginBottom: 3 }}>Keterangan</div>
+          <div style={{ fontSize: 13, color: COLORS.inkSoft, lineHeight: 1.5 }}>{entry.keterangan}</div>
+        </div>
+      )}
+    </Card>
+  );
+}
+
+function AbsensiForm({ namaAktif, onCancel, onSubmit }) {
+  const [tanggal, setTanggal] = useState(todayISO());
+  const [shift, setShift] = useState("pagi");
+  const [kondisi, setKondisi] = useState("Aman Terkendali");
+  const [keterangan, setKeterangan] = useState("");
+  const [error, setError] = useState("");
+
+  function handleSubmit(e) {
+    e.preventDefault();
+    if (kondisi === "Ada Gangguan" && !keterangan.trim()) {
+      setError("Keterangan wajib diisi kalau ada kejadian, untuk dokumentasi.");
+      return;
+    }
+    onSubmit({ tanggal, shift, kondisi, keterangan: keterangan.trim() });
+  }
+
+  return (
+    <FormShell title="Isi Laporan Jaga" onCancel={onCancel} onSubmit={handleSubmit}>
+      <div style={{ marginBottom: 12 }}>
+        <div style={{ fontSize: 13, color: COLORS.inkSoft, fontWeight: 600, marginBottom: 5 }}>Petugas</div>
+        <div style={{ padding: "9px 11px", borderRadius: 7, background: COLORS.bg, fontWeight: 600 }}>{namaAktif}</div>
+      </div>
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 12 }}>
+        <Field label="Tanggal"><input type="date" value={tanggal} max={todayISO()} onChange={(e) => setTanggal(e.target.value)} style={inputStyle} /></Field>
+        <Field label="Shift">
+          <select value={shift} onChange={(e) => setShift(e.target.value)} style={inputStyle}>
+            <option value="pagi">Pagi</option>
+            <option value="malam">Malam</option>
+          </select>
+        </Field>
+      </div>
+      <div style={{ marginBottom: 12 }}>
+        <div style={{ fontSize: 13, color: COLORS.inkSoft, fontWeight: 600, marginBottom: 6 }}>Kondisi Selama Jaga</div>
+        <div style={{ display: "flex", gap: 8 }}>
+          {KONDISI_ABSENSI.map((k) => {
+            const active = kondisi === k;
+            const warna = k === "Ada Gangguan" ? COLORS.danger : COLORS.success;
+            const warnaSoft = k === "Ada Gangguan" ? COLORS.dangerSoft : COLORS.successSoft;
+            return (
+              <button key={k} type="button" onClick={() => setKondisi(k)} style={{
+                flex: 1, padding: "10px 8px", borderRadius: 8, cursor: "pointer", fontSize: 13, fontWeight: 600,
+                border: `1.5px solid ${active ? warna : COLORS.divider}`,
+                background: active ? warnaSoft : "#fff",
+                color: active ? warna : COLORS.inkSoft,
+              }}>{k}</button>
+            );
+          })}
+        </div>
+      </div>
+      <div style={{ marginBottom: 16 }}>
+        <Field label={`Keterangan ${kondisi === "Ada Gangguan" ? "(wajib diisi)" : "(opsional)"}`}>
+          <textarea value={keterangan} onChange={(e) => setKeterangan(e.target.value)} rows={4} placeholder="Ceritakan kejadiannya, misal: kemalingan, keributan warga, kebakaran, atau hal lain yang mengganggu keamanan & ketertiban" style={{ ...inputStyle, resize: "vertical" }} />
+        </Field>
+      </div>
+      {error && <div style={{ fontSize: 12.5, color: COLORS.danger, background: COLORS.dangerSoft, padding: "8px 10px", borderRadius: 6, marginBottom: 12 }}>{error}</div>}
+      <Btn type="submit">Simpan Laporan</Btn>
+    </FormShell>
+  );
+}
+
+function AbsensiSecurityView({ absensiSecurity, role, namaAktif, onSubmit }) {
+  const [selectedIso, setSelectedIso] = useState(null);
+  const [showForm, setShowForm] = useState(false);
+  const grid = useMemo(() => buildCalendarGrid(30), []);
+
+  function findEntry(iso, shift) {
+    return absensiSecurity.find((a) => a.tanggal === iso && a.shift === shift) || null;
+  }
+
+  const recentIsoDesc = useMemo(() => {
+    return grid.filter((c) => c.inRange).sort((a, b) => a.dayOffset - b.dayOffset).slice(0, 5).map((c) => c.iso);
+  }, [grid]);
+
+  const isoListToShow = selectedIso ? [selectedIso] : recentIsoDesc;
+
+  return (
+    <>
+      <SectionTitle
+        title="Absensi Security"
+        subtitle="Laporan kondisi jaga, 1x per shift"
+      />
+
+      {showForm && <AbsensiForm namaAktif={namaAktif} onCancel={() => setShowForm(false)} onSubmit={(data) => { onSubmit(data); setShowForm(false); }} />}
+
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 14, marginBottom: 14, fontSize: 12, color: COLORS.inkSoft }}>
+        <span style={{ display: "flex", alignItems: "center", gap: 5 }}><span style={{ width: 10, height: 10, borderRadius: 3, background: COLORS.success }} />Aman</span>
+        <span style={{ display: "flex", alignItems: "center", gap: 5 }}><span style={{ width: 10, height: 10, borderRadius: 3, background: COLORS.danger }} />Ada Gangguan</span>
+        <span style={{ display: "flex", alignItems: "center", gap: 5 }}><span style={{ width: 10, height: 10, borderRadius: 3, background: COLORS.inkFaint }} />Belum Lapor</span>
+      </div>
+
+      <Card style={{ padding: 16, marginBottom: 20 }}>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(7,1fr)", gap: 4, marginBottom: 6 }}>
+          {["Min", "Sen", "Sel", "Rab", "Kam", "Jum", "Sab"].map((h) => (
+            <div key={h} style={{ textAlign: "center", fontSize: 10.5, color: COLORS.inkFaint }}>{h}</div>
+          ))}
+        </div>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(7,1fr)", gap: 4 }}>
+          {grid.map((cell, i) => {
+            if (!cell.inRange) return <div key={i} />;
+            const isSelected = cell.iso === selectedIso;
+            return (
+              <button
+                key={i}
+                onClick={() => setSelectedIso(isSelected ? null : cell.iso)}
+                style={{
+                  aspectRatio: "1", borderRadius: 8, cursor: "pointer", padding: 3,
+                  display: "flex", flexDirection: "column", justifyContent: "space-between",
+                  border: isSelected ? `2px solid ${COLORS.accent}` : cell.isToday ? `1.5px solid ${COLORS.ink}` : `1px solid ${COLORS.divider}`,
+                  background: isSelected ? COLORS.accentSoft : "#fff",
+                }}
+              >
+                <div style={{ fontSize: 10, color: COLORS.inkFaint, textAlign: "right" }}>{cell.tanggalNum}</div>
+                <div style={{ display: "flex", gap: 2 }}>
+                  <StripStatus entry={findEntry(cell.iso, "pagi")} />
+                  <StripStatus entry={findEntry(cell.iso, "malam")} />
+                </div>
+              </button>
+            );
+          })}
+        </div>
+      </Card>
+
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12, flexWrap: "wrap", gap: 8 }}>
+        <div style={{ fontWeight: 700, fontSize: 15.5 }}>{selectedIso ? dayLabelShort(selectedIso) : "Laporan Terbaru"}</div>
+        {selectedIso && <Btn variant="ghost" onClick={() => setSelectedIso(null)} style={{ padding: "6px 12px", fontSize: 12 }}>Tampilkan Semua</Btn>}
+      </div>
+
+      <div style={{ paddingBottom: role === "security" ? 90 : 0 }}>
+        {isoListToShow.map((iso) => (
+          <React.Fragment key={iso}>
+            <AbsensiCard iso={iso} shift="malam" entry={findEntry(iso, "malam")} />
+            <AbsensiCard iso={iso} shift="pagi" entry={findEntry(iso, "pagi")} />
+          </React.Fragment>
+        ))}
+      </div>
+
+      {role === "security" && (
+        <div className="fab-btn">
+          <Btn pill onClick={() => setShowForm(true)} style={{ boxShadow: "0 10px 24px rgba(228,113,30,0.35)", fontSize: 15, padding: "13px 22px" }}>
+            <ClipboardCheck size={16} /> Isi Laporan Jaga
+          </Btn>
+        </div>
+      )}
+    </>
   );
 }
 
