@@ -691,7 +691,7 @@ export default function SBTPintar() {
       `}</style>
 
       {/* header */}
-      <header className="no-print" style={{ background: COLORS.sageDeep, color: "#fff", padding: "14px 24px", display: "flex", alignItems: "center", gap: 14, borderBottom: `3px solid ${COLORS.accent}`, flexWrap: "wrap" }}>
+      <header className="no-print" style={{ background: COLORS.sageDeep, color: "#fff", padding: "14px 24px", display: "flex", alignItems: "center", gap: 14, borderBottom: `3px solid ${COLORS.accent}`, flexWrap: "wrap", position: "sticky", top: 0, zIndex: 50, WebkitTransform: "translateZ(0)", transform: "translateZ(0)" }}>
         <div style={{ width: 36, height: 36, borderRadius: 10, background: COLORS.accent, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
           <ShieldCheck size={19} color="#fff" />
         </div>
@@ -710,7 +710,7 @@ export default function SBTPintar() {
 
       <div style={{ display: "flex" }}>
         {/* sidebar */}
-        <nav className="sidebar no-print" style={{ width: 216, flexShrink: 0, padding: "20px 14px", background: COLORS.bgAlt, position: "sticky", top: 0, height: "calc(100vh - 66px)", borderRight: `1px solid ${COLORS.divider}` }}>
+        <nav className="sidebar no-print" style={{ width: 216, flexShrink: 0, padding: "20px 14px", background: COLORS.bgAlt, position: "sticky", top: 66, height: "calc(100vh - 66px)", borderRight: `1px solid ${COLORS.divider}` }}>
           {tabs.map((t) => {
             const Icon = t.icon; const active = tab === t.id;
             return (
