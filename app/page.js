@@ -2,9 +2,10 @@ import SBTPintarDemo from "../SBTPintarDemo";
 
 export default function Page() {
   return (
-    <>
+    <div style={{ height: "100vh", display: "flex", flexDirection: "column" }}>
       <div
         style={{
+          flexShrink: 0,
           background: "#4C7A4A",
           color: "#fff",
           textAlign: "center",
@@ -15,7 +16,9 @@ export default function Page() {
       >
         🚧 Demo tampilan — aplikasi sedang dibangun, data yang ditampilkan masih contoh
       </div>
-      <SBTPintarDemo />
-    </>
+      <div style={{ flex: 1, minHeight: 0, overflow: "auto" }}>
+        <SBTPintarDemo />
+      </div>
+    </div>
   );
 }

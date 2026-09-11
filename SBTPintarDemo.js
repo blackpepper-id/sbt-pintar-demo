@@ -394,18 +394,22 @@ function SegmentedControl({ options, value, onChange }) {
   );
 }
 
-function TxRow({ t }) {
+function TxCard({ t }) {
   return (
-    <tr>
-      <td className="mono">{t.tanggal}</td>
-      <td>{t.kategori}</td>
-      <td>{t.subkategori || "—"}</td>
-      <td>{t.keterangan}</td>
-      <td className="mono" style={{ textAlign: "right", color: t.tipe === "masuk" ? COLORS.success : COLORS.danger, fontWeight: 600 }}>
+    <div style={{ padding: "12px 20px", borderBottom: `1px solid ${COLORS.divider}`, display: "flex", justifyContent: "space-between", gap: 12 }}>
+      <div style={{ minWidth: 0 }}>
+        <div className="mono" style={{ fontSize: 12, color: COLORS.inkSoft, marginBottom: 3 }}>{t.tanggal}</div>
+        <div style={{ fontSize: 13.5, fontWeight: 600, marginBottom: 2 }}>{t.keterangan}</div>
+        <div style={{ fontSize: 11.5, color: COLORS.inkFaint }}>{t.kategori}{t.subkategori ? ` · ${t.subkategori}` : ""}</div>
+      </div>
+      <div className="mono" style={{ flexShrink: 0, fontWeight: 700, fontSize: 13.5, color: t.tipe === "masuk" ? COLORS.success : COLORS.danger, whiteSpace: "nowrap" }}>
         {t.tipe === "masuk" ? "+" : "−"}{formatRp(t.jumlah)}
-      </td>
-    </tr>
+      </div>
+    </div>
   );
+}
+function EmptyRow({ text }) {
+  return <div style={{ padding: 20, textAlign: "center", color: COLORS.inkSoft, fontSize: 13.5 }}>{text}</div>;
 }
 
 // ============================================================
@@ -646,14 +650,14 @@ export default function SBTPintar() {
   ];
 
   if (loading) {
-    return <div style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", background: COLORS.bg, fontFamily: "'Inter', sans-serif", color: COLORS.inkSoft }}>Memuat data SBT Pintar…</div>;
+    return <div style={{ minHeight: "100%", display: "flex", alignItems: "center", justifyContent: "center", background: COLORS.bg, fontFamily: "'Inter', sans-serif", color: COLORS.inkSoft }}>Memuat data SBT Pintar…</div>;
   }
   if (!loggedInUser) {
     return <LoginScreen pengguna={pengguna} onLogin={handleLogin} demoPin={DEMO_PIN} />;
   }
 
   return (
-    <div className="app-root" style={{ minHeight: "100vh", background: COLORS.bg, fontFamily: "'Inter', sans-serif", color: COLORS.ink, paddingBottom: 90 }}>
+    <div className="app-root" style={{ minHeight: "100%", background: COLORS.bg, fontFamily: "'Inter', sans-serif", color: COLORS.ink, paddingBottom: 90 }}>
       <style>{`
         * { box-sizing: border-box; }
         table { border-collapse: collapse; width: 100%; }
@@ -710,7 +714,7 @@ export default function SBTPintar() {
 
       <div style={{ display: "flex" }}>
         {/* sidebar */}
-        <nav className="sidebar no-print" style={{ width: 216, flexShrink: 0, padding: "20px 14px", background: COLORS.bgAlt, position: "sticky", top: 66, height: "calc(100vh - 66px)", borderRight: `1px solid ${COLORS.divider}` }}>
+        <nav className="sidebar no-print" style={{ width: 216, flexShrink: 0, padding: "20px 14px", background: COLORS.bgAlt, position: "sticky", top: 66, height: "calc(100% - 66px)", borderRight: `1px solid ${COLORS.divider}` }}>
           {tabs.map((t) => {
             const Icon = t.icon; const active = tab === t.id;
             return (
@@ -746,14 +750,9 @@ export default function SBTPintar() {
               </div>
               <Card>
                 <div style={{ padding: "16px 20px", borderBottom: `1px solid ${COLORS.divider}`, fontWeight: 700, fontSize: 15.5 }}>Mutasi Terbaru</div>
-                <div style={{ overflowX: "auto" }}>
-                <table>
-                  <thead><tr><th>Tanggal</th><th>Kategori</th><th>Sub Kategori</th><th>Keterangan</th><th style={{ textAlign: "right" }}>Jumlah</th></tr></thead>
-                  <tbody>
-                    {recentTx.map((t) => <TxRow key={t.id} t={t} />)}
-                    {recentTx.length === 0 && <tr><td colSpan={5} style={{ color: COLORS.inkSoft, textAlign: "center", padding: 20 }}>Belum ada transaksi.</td></tr>}
-                  </tbody>
-                </table>
+                <div>
+                  {recentTx.map((t) => <TxCard key={t.id} t={t} />)}
+                  {recentTx.length === 0 && <EmptyRow text="Belum ada transaksi." />}
                 </div>
               </Card>
             </>
@@ -912,41 +911,32 @@ export default function SBTPintar() {
                 {showExpenseForm && canCatatKeuangan(role) && (
                   <div className="no-print" style={{ padding: 18 }}><ExpenseFormInline onCancel={() => setShowExpenseForm(false)} onSubmit={addExpense} /></div>
                 )}
-                <div style={{ overflowX: "auto" }}>
-                <table>
-                  <thead><tr><th>Tanggal</th><th>Kategori</th><th>Sub Kategori</th><th>Keterangan</th><th style={{ textAlign: "right" }}>Jumlah</th></tr></thead>
-                  <tbody>
-                    {semuaPengeluaran.map((t) => <TxRow key={t.id} t={t} />)}
-                    {semuaPengeluaran.length === 0 && <tr><td colSpan={5} style={{ textAlign: "center", color: COLORS.inkSoft, padding: 16 }}>Belum ada pengeluaran tercatat.</td></tr>}
-                  </tbody>
-                </table>
+                <div>
+                  {semuaPengeluaran.map((t) => <TxCard key={t.id} t={t} />)}
+                  {semuaPengeluaran.length === 0 && <EmptyRow text="Belum ada pengeluaran tercatat." />}
                 </div>
               </Card>
 
               <Card style={{ marginBottom: 20 }}>
                 <div style={{ padding: "16px 20px", borderBottom: `1px solid ${COLORS.divider}`, fontWeight: 700, fontSize: 15.5, color: COLORS.success }}>Rincian Pemasukan (IPL) — {monthLabel(laporanBulan)}</div>
-                <div style={{ overflowX: "auto" }}>
-                <table>
-                  <thead><tr><th>Tanggal</th><th>Keterangan</th><th style={{ textAlign: "right" }}>Jumlah</th></tr></thead>
-                  <tbody>
-                    {laporanTx.filter((t) => t.tipe === "masuk").sort((a, b) => a.tanggal.localeCompare(b.tanggal)).map((t) => (
-                      <tr key={t.id}><td className="mono">{t.tanggal}</td><td>{t.keterangan}</td><td className="mono" style={{ textAlign: "right", color: COLORS.success, fontWeight: 600 }}>+{formatRp(t.jumlah)}</td></tr>
-                    ))}
-                    {laporanTx.filter((t) => t.tipe === "masuk").length === 0 && <tr><td colSpan={3} style={{ textAlign: "center", color: COLORS.inkSoft, padding: 16 }}>Belum ada pemasukan bulan ini.</td></tr>}
-                  </tbody>
-                </table>
+                <div>
+                  {laporanTx.filter((t) => t.tipe === "masuk").sort((a, b) => a.tanggal.localeCompare(b.tanggal)).map((t) => (
+                    <div key={t.id} style={{ padding: "12px 20px", borderBottom: `1px solid ${COLORS.divider}`, display: "flex", justifyContent: "space-between", gap: 12 }}>
+                      <div style={{ minWidth: 0 }}>
+                        <div className="mono" style={{ fontSize: 12, color: COLORS.inkSoft, marginBottom: 3 }}>{t.tanggal}</div>
+                        <div style={{ fontSize: 13.5, fontWeight: 600 }}>{t.keterangan}</div>
+                      </div>
+                      <div className="mono" style={{ flexShrink: 0, fontWeight: 700, fontSize: 13.5, color: COLORS.success, whiteSpace: "nowrap" }}>+{formatRp(t.jumlah)}</div>
+                    </div>
+                  ))}
+                  {laporanTx.filter((t) => t.tipe === "masuk").length === 0 && <EmptyRow text="Belum ada pemasukan bulan ini." />}
                 </div>
               </Card>
               <Card>
                 <div style={{ padding: "16px 20px", borderBottom: `1px solid ${COLORS.divider}`, fontWeight: 700, fontSize: 15.5, color: COLORS.danger }}>Rincian Pengeluaran — {monthLabel(laporanBulan)}</div>
-                <div style={{ overflowX: "auto" }}>
-                <table>
-                  <thead><tr><th>Tanggal</th><th>Kategori</th><th>Sub Kategori</th><th>Keterangan</th><th style={{ textAlign: "right" }}>Jumlah</th></tr></thead>
-                  <tbody>
-                    {laporanTx.filter((t) => t.tipe === "keluar").sort((a, b) => a.tanggal.localeCompare(b.tanggal)).map((t) => <TxRow key={t.id} t={t} />)}
-                    {laporanTx.filter((t) => t.tipe === "keluar").length === 0 && <tr><td colSpan={5} style={{ textAlign: "center", color: COLORS.inkSoft, padding: 16 }}>Belum ada pengeluaran bulan ini.</td></tr>}
-                  </tbody>
-                </table>
+                <div>
+                  {laporanTx.filter((t) => t.tipe === "keluar").sort((a, b) => a.tanggal.localeCompare(b.tanggal)).map((t) => <TxCard key={t.id} t={t} />)}
+                  {laporanTx.filter((t) => t.tipe === "keluar").length === 0 && <EmptyRow text="Belum ada pengeluaran bulan ini." />}
                 </div>
               </Card>
             </>
@@ -996,30 +986,26 @@ export default function SBTPintar() {
 
               <Card>
                 <div style={{ padding: "16px 20px", borderBottom: `1px solid ${COLORS.divider}`, fontWeight: 700, fontSize: 15.5 }}>Aktivitas Darurat</div>
-                <div style={{ overflowX: "auto" }}>
-                <table>
-                  <thead><tr><th>Tanggal</th><th>Pelapor</th><th>Kejadian</th><th>Ditangani Oleh</th><th>Status</th></tr></thead>
-                  <tbody>
-                    {alarmLog.map((a) => (
-                      <tr key={a.id}>
-                        <td className="mono">{a.tanggal} <span style={{ color: COLORS.inkSoft }}>{a.waktu}</span></td>
-                        <td>{a.pelapor}</td>
-                        <td>{a.issue}</td>
-                        <td style={{ color: a.ditanganiOleh ? COLORS.ink : COLORS.inkFaint }}>{a.ditanganiOleh || "—"}</td>
-                        <td>
-                          {canKelolaDarurat(role) ? (
-                            <select value={a.status} onChange={(e) => updateAlarmStatus(a.id, e.target.value)} style={{ ...inputStyle, padding: "5px 9px", fontSize: 12, color: alarmStatusColor(a.status), fontWeight: 700 }}>
-                              {ALARM_STATUS.map((s) => <option key={s} value={s}>{s}</option>)}
-                            </select>
-                          ) : (
-                            <span style={{ fontWeight: 700, fontSize: 12, color: alarmStatusColor(a.status) }}>{a.status}</span>
-                          )}
-                        </td>
-                      </tr>
-                    ))}
-                    {alarmLog.length === 0 && <tr><td colSpan={5} style={{ textAlign: "center", color: COLORS.inkSoft, padding: 16 }}>Belum ada laporan darurat.</td></tr>}
-                  </tbody>
-                </table>
+                <div>
+                  {alarmLog.map((a) => (
+                    <div key={a.id} style={{ padding: "14px 20px", borderBottom: `1px solid ${COLORS.divider}` }}>
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 10, marginBottom: 6 }}>
+                        <div className="mono" style={{ fontSize: 12, color: COLORS.inkSoft }}>{a.tanggal} <span>{a.waktu}</span></div>
+                        {canKelolaDarurat(role) ? (
+                          <select value={a.status} onChange={(e) => updateAlarmStatus(a.id, e.target.value)} style={{ ...inputStyle, padding: "5px 9px", fontSize: 12, color: alarmStatusColor(a.status), fontWeight: 700, flexShrink: 0 }}>
+                            {ALARM_STATUS.map((s) => <option key={s} value={s}>{s}</option>)}
+                          </select>
+                        ) : (
+                          <span style={{ fontWeight: 700, fontSize: 12, color: alarmStatusColor(a.status), flexShrink: 0 }}>{a.status}</span>
+                        )}
+                      </div>
+                      <div style={{ fontSize: 13.5, fontWeight: 600, marginBottom: 4 }}>{a.issue}</div>
+                      <div style={{ fontSize: 12, color: COLORS.inkSoft }}>
+                        Pelapor: {a.pelapor} · Ditangani: <span style={{ color: a.ditanganiOleh ? COLORS.ink : COLORS.inkFaint }}>{a.ditanganiOleh || "—"}</span>
+                      </div>
+                    </div>
+                  ))}
+                  {alarmLog.length === 0 && <EmptyRow text="Belum ada laporan darurat." />}
                 </div>
               </Card>
             </>
@@ -1033,26 +1019,21 @@ export default function SBTPintar() {
               </Card>
               {showAddUser && <AddUserForm onCancel={() => setShowAddUser(false)} onSubmit={addPengguna} />}
               <Card>
-                <div style={{ overflowX: "auto" }}>
-                <table>
-                  <thead><tr><th>Nama</th><th>No. HP</th><th>Peran</th></tr></thead>
-                  <tbody>
-                    {pengguna.map((p) => (
-                      <tr key={p.id}>
-                        <td style={{ fontWeight: 600 }}>{p.nama}</td>
-                        <td className="mono">{p.hp}</td>
-                        <td>
-                          <select value={p.role} onChange={(e) => updatePenggunaRole(p.id, e.target.value)} style={{ ...inputStyle, padding: "6px 10px", fontSize: 12.5 }}>
-                            <option value="admin">Administrator</option>
-                            <option value="pengurus">Pengurus</option>
-                            <option value="security">Security</option>
-                            <option value="warga">Warga</option>
-                          </select>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
+                <div>
+                  {pengguna.map((p) => (
+                    <div key={p.id} style={{ padding: "12px 20px", borderBottom: `1px solid ${COLORS.divider}`, display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10 }}>
+                      <div style={{ minWidth: 0 }}>
+                        <div style={{ fontWeight: 600, fontSize: 13.5 }}>{p.nama}</div>
+                        <div className="mono" style={{ fontSize: 12, color: COLORS.inkSoft }}>{p.hp}</div>
+                      </div>
+                      <select value={p.role} onChange={(e) => updatePenggunaRole(p.id, e.target.value)} style={{ ...inputStyle, padding: "6px 10px", fontSize: 12.5, flexShrink: 0 }}>
+                        <option value="admin">Administrator</option>
+                        <option value="pengurus">Pengurus</option>
+                        <option value="security">Security</option>
+                        <option value="warga">Warga</option>
+                      </select>
+                    </div>
+                  ))}
                 </div>
               </Card>
             </>
@@ -1529,7 +1510,7 @@ function LoginScreen({ pengguna, onLogin, demoPin }) {
   }
 
   return (
-    <div style={{ minHeight: "100vh", background: COLORS.bg, display: "flex", alignItems: "center", justifyContent: "center", padding: 20, fontFamily: "'Inter', sans-serif" }}>
+    <div style={{ minHeight: "100%", background: COLORS.bg, display: "flex", alignItems: "center", justifyContent: "center", padding: 20, fontFamily: "'Inter', sans-serif" }}>
       <style>{`@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');`}</style>
       <Card style={{ padding: 30, maxWidth: 380, width: "100%", boxShadow: "0 20px 50px rgba(0,0,0,0.06)" }}>
         <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 6 }}>
