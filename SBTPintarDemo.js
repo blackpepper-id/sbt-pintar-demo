@@ -4,7 +4,7 @@ import React, { useState, useEffect, useMemo, useCallback, useRef } from "react"
 import {
   LayoutDashboard, Wallet, CalendarDays, FileText, Siren,
   Phone, MessageCircle, Plus, X, Printer, ShieldCheck, Upload,
-  UserCog, CheckCircle2, Clock, AlertTriangle, XCircle, Send, ImageIcon, Pencil, ClipboardCheck, Info, Trash2, MoreVertical,
+  UserCog, CheckCircle2, Clock, AlertTriangle, XCircle, Send, ImageIcon, Pencil, ClipboardCheck, Info, Trash2, MoreVertical, KeyRound,
 } from "lucide-react";
 
 // ============================================================
@@ -571,12 +571,20 @@ export default function SBTPintar() {
   const [kegiatanDetail, setKegiatanDetail] = useState(null);
   const [showPanicForm, setShowPanicForm] = useState(false);
   const [showAddUser, setShowAddUser] = useState(false);
+  const [showGantiPin, setShowGantiPin] = useState(false);
   const [editingWarga, setEditingWarga] = useState(null);
   const [showPayModal, setShowPayModal] = useState(false);
   const [cellModal, setCellModal] = useState(null); // { warga, monthKey }
   const [gridFilter, setGridFilter] = useState("semua");
   const [armed, setArmed] = useState(false);
   const [toast, setToast] = useState(null);
+
+  useEffect(() => {
+    if (loggedInUser?.harusGantiPin) {
+      setToast("PIN Anda masih PIN sementara — disarankan ganti sekarang lewat ikon kunci di pojok kanan atas.");
+    }
+  }, [loggedInUser?.id]);
+
   const lastTapRef = useRef(0);
   const armTimerRef = useRef(null);
 
@@ -609,7 +617,7 @@ export default function SBTPintar() {
     return () => clearTimeout(t);
   }, [toast]);
 
-  const DEMO_PIN = "123456";
+  const DEMO_PIN = "123456"; // PIN awal default semua akun contoh — tetap dipakai kalau belum pernah direset
 
   function normalizeHp(raw) {
     let d = raw.replace(/\D/g, "");
@@ -620,11 +628,36 @@ export default function SBTPintar() {
     const cleanHp = normalizeHp(hp);
     const found = pengguna.find((p) => normalizeHp(p.hp) === cleanHp);
     if (!found) return { ok: false, message: "No. HP tidak terdaftar. Hubungi Pengurus untuk didaftarkan di menu Warga." };
-    if (pin !== DEMO_PIN) return { ok: false, message: `PIN salah. (Demo: gunakan PIN ${DEMO_PIN} untuk akun mana pun.)` };
+    const pinAsli = found.pin || DEMO_PIN;
+    if (pin !== pinAsli) return { ok: false, message: "PIN salah. Lupa PIN? Hubungi Pengurus untuk direset." };
     setLoggedInUser(found);
     return { ok: true };
   }
   function handleLogout() { setLoggedInUser(null); }
+
+  // ---- PIN: reset oleh pengurus & ganti mandiri oleh pengguna ----
+  const resetPinWarga = (id) => {
+    const pinBaru = String(Math.floor(100000 + Math.random() * 900000));
+    setPengguna((prev) => {
+      const next = prev.map((p) => p.id === id ? { ...p, pin: pinBaru, harusGantiPin: true } : p);
+      saveKey(KEYS.pengguna, next);
+      return next;
+    });
+    return pinBaru;
+  };
+  const gantiPinSendiri = (pinLama, pinBaru) => {
+    if (!loggedInUser) return { ok: false, message: "Sesi login tidak ditemukan." };
+    const pinAsli = loggedInUser.pin || DEMO_PIN;
+    if (pinLama !== pinAsli) return { ok: false, message: "PIN lama salah." };
+    if (!/^\d{6}$/.test(pinBaru)) return { ok: false, message: "PIN baru harus 6 digit angka." };
+    setPengguna((prev) => {
+      const next = prev.map((p) => p.id === loggedInUser.id ? { ...p, pin: pinBaru, harusGantiPin: false } : p);
+      saveKey(KEYS.pengguna, next);
+      return next;
+    });
+    setLoggedInUser((prev) => ({ ...prev, pin: pinBaru, harusGantiPin: false }));
+    return { ok: true };
+  };
 
   // warga (rumah) milik user yang sedang login (kalau role === 'warga')
   const myWarga = useMemo(() => {
@@ -909,31 +942,32 @@ export default function SBTPintar() {
       `}</style>
 
       {/* header */}
-      <header className="no-print app-header" style={{ background: COLORS.sageDeep, color: "#fff", padding: "14px 20px", display: "flex", alignItems: "center", gap: 12, borderBottom: `3px solid ${COLORS.accent}`, flexWrap: "nowrap", position: "sticky", top: 0, zIndex: 50, WebkitTransform: "translateZ(0)", transform: "translateZ(0)" }}>
-        <div className="header-brand" style={{ display: "flex", alignItems: "center", gap: 10, flex: 1, minWidth: 0 }}>
-          <div style={{ width: 46, height: 46, borderRadius: 12, overflow: "hidden", flexShrink: 0, background: "#fff" }}>
+      <header className="no-print app-header" style={{ background: COLORS.sageDeep, color: "#fff", padding: "12px 20px", display: "flex", alignItems: "center", gap: 10, borderBottom: `3px solid ${COLORS.accent}`, flexWrap: "nowrap", position: "sticky", top: 0, zIndex: 50, WebkitTransform: "translateZ(0)", transform: "translateZ(0)" }}>
+        <div className="header-brand" style={{ display: "flex", alignItems: "center", gap: 9, flex: 1, minWidth: 0 }}>
+          <div style={{ width: 34, height: 34, borderRadius: 9, overflow: "hidden", flexShrink: 0, background: "#fff" }}>
             <img src={LOGO_PAGUYUBAN} alt="Logo Paguyuban Warga" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
           </div>
           <div style={{ minWidth: 0 }}>
-            <div style={{ fontWeight: 700, fontSize: 15.5, letterSpacing: "-0.01em", lineHeight: 1.15, color: "#fff", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>SBT Pintar</div>
-            <div className="header-tagline-group">
-              <div style={{ fontSize: 10.5, fontWeight: 600, color: "rgba(255,255,255,0.85)", lineHeight: 1.3, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>Community Management &amp; Financial Dashboard</div>
-              <div style={{ fontSize: 10.5, color: "rgba(255,255,255,0.7)", lineHeight: 1.3, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>Cluster Sindangbarang Terrace</div>
-            </div>
+            <div style={{ fontWeight: 700, fontSize: 14.5, letterSpacing: "-0.01em", lineHeight: 1.15, color: "#fff", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>SBT Pintar</div>
+            <div style={{ fontSize: 10.5, color: "rgba(255,255,255,0.72)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>Cluster Sindangbarang Terrace</div>
           </div>
         </div>
-        <div className="header-user" style={{ display: "flex", alignItems: "center", gap: 10, flexShrink: 0 }}>
-          <div style={{ textAlign: "right", minWidth: 0, maxWidth: 170 }} className="header-user-info">
-            <div style={{ fontWeight: 600, fontSize: 13.5, lineHeight: 1.2, color: "#fff", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{namaAktif}</div>
-            <div style={{ fontSize: 11.5, color: "rgba(255,255,255,0.75)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{roleLabel[role]}</div>
+        <div className="header-user" style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
+          <div style={{ textAlign: "right", minWidth: 0, maxWidth: 130 }} className="header-user-info">
+            <div style={{ fontWeight: 600, fontSize: 12, lineHeight: 1.2, color: "#fff", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{namaAktif}</div>
+            <div style={{ fontSize: 10, color: "rgba(255,255,255,0.72)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{roleLabel[role]}</div>
           </div>
-          <Btn variant="ghost" onClick={handleLogout} style={{ padding: "7px 12px", fontSize: 12.5, background: "rgba(255,255,255,0.16)", color: "#fff", flexShrink: 0 }}>Keluar</Btn>
+          <button onClick={() => setShowGantiPin(true)} aria-label="Ganti PIN" title="Ganti PIN" style={{ position: "relative", background: "rgba(255,255,255,0.16)", border: "none", borderRadius: 999, width: 30, height: 30, cursor: "pointer", color: "#fff", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+            <KeyRound size={14} />
+            {loggedInUser?.harusGantiPin && <span style={{ position: "absolute", top: -2, right: -2, width: 8, height: 8, borderRadius: 999, background: COLORS.warning, border: "1.5px solid " + COLORS.sageDeep }} />}
+          </button>
+          <Btn variant="ghost" onClick={handleLogout} style={{ padding: "6px 10px", fontSize: 11.5, background: "rgba(255,255,255,0.16)", color: "#fff", flexShrink: 0 }}>Keluar</Btn>
         </div>
       </header>
 
       <div style={{ display: "flex" }}>
         {/* sidebar */}
-        <nav className="sidebar no-print" style={{ width: 216, flexShrink: 0, padding: "20px 14px", background: COLORS.bgAlt, position: "sticky", top: 80, height: "calc(100% - 80px)", borderRight: `1px solid ${COLORS.divider}` }}>
+        <nav className="sidebar no-print" style={{ width: 216, flexShrink: 0, padding: "20px 14px", background: COLORS.bgAlt, position: "sticky", top: 60, height: "calc(100% - 60px)", borderRight: `1px solid ${COLORS.divider}` }}>
           {tabs.map((t) => {
             const Icon = t.icon; const active = tab === t.id;
             return (
@@ -957,7 +991,7 @@ export default function SBTPintar() {
         </nav>
 
         {/* main */}
-        <main className="maincol" style={{ flex: 1, padding: "28px 28px", maxWidth: 1000 }}>
+        <main className="maincol" style={{ flex: 1, padding: "28px 32px", maxWidth: 1280 }}>
           {tab === "dashboard" && (
             <>
               <SectionTitle title="Ringkasan Kas" subtitle={monthLabel(currentMonthKey)} />
@@ -1328,6 +1362,7 @@ export default function SBTPintar() {
                   pengguna={pengguna}
                   jabatanOptions={jabatanOptions}
                   onAddJabatan={addJabatanOption}
+                  onResetPin={resetPinWarga}
                   onCancel={() => setEditingWarga(null)}
                   onSubmit={(changes) => { updateWargaLengkap(editingWarga.id, changes); setEditingWarga(null); }}
                 />
@@ -1354,6 +1389,7 @@ export default function SBTPintar() {
         </>
       )}
       {showPanicForm && <PanicModal defaultPelapor={namaAktif} onCancel={() => setShowPanicForm(false)} onSubmit={submitPanic} />}
+      {showGantiPin && <GantiPinModal onCancel={() => setShowGantiPin(false)} onSubmit={gantiPinSendiri} />}
       {showPayModal && myWarga && (
         <PayIPLModal
           myWarga={myWarga}
@@ -2200,7 +2236,7 @@ function AddUserForm({ warga, pengguna, jabatanOptions, onAddJabatan, onCancel, 
   );
 }
 
-function EditWargaModal({ data: p, warga, pengguna, jabatanOptions, onAddJabatan, onCancel, onSubmit }) {
+function EditWargaModal({ data: p, warga, pengguna, jabatanOptions, onAddJabatan, onResetPin, onCancel, onSubmit }) {
   const [nama, setNama] = useState(p.nama);
   const [hp, setHp] = useState(p.hp);
   const [role, setRole] = useState(p.role);
@@ -2208,6 +2244,7 @@ function EditWargaModal({ data: p, warga, pengguna, jabatanOptions, onAddJabatan
   const [wargaId, setWargaId] = useState(p.wargaId || warga[0]?.id || "");
   const [kepemilikan, setKepemilikan] = useState(p.kepemilikan || "Pemilik");
   const [reminderIPL, setReminderIPL] = useState(!!p.reminderIPL);
+  const [pinBaruDitampilkan, setPinBaruDitampilkan] = useState(null);
 
   const penghuniRumahBaru = pengguna.filter((x) => x.wargaId === wargaId && x.id !== p.id);
   const rumahBaruSudahAdaKontakUtama = penghuniRumahBaru.some((x) => x.reminderIPL);
@@ -2284,6 +2321,53 @@ function EditWargaModal({ data: p, warga, pengguna, jabatanOptions, onAddJabatan
           )}
 
           <Btn type="submit">Simpan Perubahan</Btn>
+
+          <div style={{ borderTop: `1px dashed ${COLORS.divider}`, paddingTop: 14, marginTop: 4 }}>
+            {pinBaruDitampilkan ? (
+              <div style={{ fontSize: 12.5, background: COLORS.successSoft, color: COLORS.success, padding: "10px 12px", borderRadius: 10 }}>
+                PIN baru untuk {p.nama}: <b style={{ fontFamily: "monospace", fontSize: 14 }}>{pinBaruDitampilkan}</b><br />
+                Sampaikan ke warga lewat WA/telepon. Warga akan disarankan ganti PIN sendiri setelah login.
+              </div>
+            ) : (
+              <Btn type="button" variant="ghost" onClick={() => setPinBaruDitampilkan(onResetPin(p.id))} style={{ width: "100%" }}>
+                Reset PIN {p.nama}
+              </Btn>
+            )}
+          </div>
+        </form>
+      </Card>
+    </div>
+  );
+}
+
+function GantiPinModal({ onCancel, onSubmit }) {
+  const [pinLama, setPinLama] = useState("");
+  const [pinBaru, setPinBaru] = useState("");
+  const [konfirmasi, setKonfirmasi] = useState("");
+  const [error, setError] = useState("");
+
+  function handleSubmit(e) {
+    e.preventDefault();
+    if (!/^\d{6}$/.test(pinBaru)) { setError("PIN baru harus 6 digit angka."); return; }
+    if (pinBaru !== konfirmasi) { setError("Konfirmasi PIN baru tidak cocok."); return; }
+    const result = onSubmit(pinLama, pinBaru);
+    if (!result.ok) { setError(result.message); return; }
+    onCancel();
+  }
+
+  return (
+    <div style={{ position: "fixed", inset: 0, background: "rgba(29,29,31,0.5)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 90, padding: 16 }}>
+      <Card style={{ padding: 22, maxWidth: 340, width: "100%" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
+          <div style={{ fontWeight: 700, fontSize: 16.5 }}>Ganti PIN</div>
+          <button onClick={onCancel} style={{ background: COLORS.bg, border: "none", borderRadius: 999, width: 30, height: 30, cursor: "pointer", color: COLORS.inkSoft, display: "flex", alignItems: "center", justifyContent: "center" }}><X size={16} /></button>
+        </div>
+        <form onSubmit={handleSubmit} style={{ display: "grid", gap: 12 }}>
+          <Field label="PIN Lama"><input type="password" inputMode="numeric" value={pinLama} onChange={(e) => setPinLama(e.target.value)} style={inputStyle} placeholder="6 digit" /></Field>
+          <Field label="PIN Baru"><input type="password" inputMode="numeric" value={pinBaru} onChange={(e) => setPinBaru(e.target.value)} style={inputStyle} placeholder="6 digit" /></Field>
+          <Field label="Konfirmasi PIN Baru"><input type="password" inputMode="numeric" value={konfirmasi} onChange={(e) => setKonfirmasi(e.target.value)} style={inputStyle} placeholder="6 digit" /></Field>
+          {error && <div style={{ fontSize: 12.5, color: COLORS.danger, background: COLORS.dangerSoft, padding: "8px 10px", borderRadius: 8 }}>{error}</div>}
+          <Btn type="submit">Simpan PIN Baru</Btn>
         </form>
       </Card>
     </div>
@@ -2340,10 +2424,11 @@ function LoginScreen({ pengguna, onLogin, demoPin }) {
     loginAs(contoh);
   }
   function loginAs(akun) {
+    const pinAkun = akun.pin || demoPin;
     setHp(akun.hp);
-    setPin(demoPin);
+    setPin(pinAkun);
     setError("");
-    const result = onLogin(akun.hp, demoPin);
+    const result = onLogin(akun.hp, pinAkun);
     if (!result.ok) setError(result.message);
   }
 
@@ -2365,13 +2450,14 @@ function LoginScreen({ pengguna, onLogin, demoPin }) {
         <div style={{ display: "grid", gap: 12, marginBottom: 18 }}>
           <Field label="No. HP terdaftar"><input value={hp} onChange={(e) => setHp(e.target.value)} onKeyDown={handleKeyDown} placeholder="0812xxxxxxxx" style={inputStyle} /></Field>
           <Field label="PIN"><input type="password" value={pin} onChange={(e) => setPin(e.target.value)} onKeyDown={handleKeyDown} placeholder="6 digit" style={inputStyle} /></Field>
+          <div style={{ fontSize: 12, color: COLORS.inkSoft, marginTop: -6 }}>Lupa PIN? Hubungi Pengurus untuk direset.</div>
           {error && <div style={{ fontSize: 12.5, color: COLORS.danger, background: COLORS.dangerSoft, padding: "9px 12px", borderRadius: 10 }}>{error}</div>}
           <Btn type="button" onClick={doLogin} style={{ padding: "12px 0" }}>Masuk</Btn>
         </div>
 
         <div style={{ borderTop: `1px solid ${COLORS.divider}`, paddingTop: 16 }}>
           <div style={{ fontSize: 11.5, color: COLORS.inkSoft, marginBottom: 10 }}>
-            Prototype demo — belum ada backend sungguhan. Gunakan PIN <b>{demoPin}</b> untuk akun mana pun, atau login cepat sebagai:
+            Prototype demo — belum ada backend sungguhan. Gunakan PIN <b>{demoPin}</b> untuk akun yang belum pernah direset, atau login cepat sebagai:
           </div>
           <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 12 }}>
             <Btn variant="ghost" style={{ fontSize: 12.5, padding: "7px 12px" }} onClick={() => quickLogin("pengurus")}>Pengurus</Btn>
