@@ -4,7 +4,7 @@ import React, { useState, useEffect, useMemo, useCallback, useRef } from "react"
 import {
   LayoutDashboard, Wallet, CalendarDays, FileText, Siren,
   Phone, MessageCircle, Plus, X, Printer, ShieldCheck, Upload,
-  UserCog, CheckCircle2, Clock, AlertTriangle, XCircle, Send, ImageIcon, Pencil, ClipboardCheck, Info,
+  UserCog, CheckCircle2, Clock, AlertTriangle, XCircle, Send, ImageIcon, Pencil, ClipboardCheck, Info, Trash2,
 } from "lucide-react";
 
 // ============================================================
@@ -120,12 +120,12 @@ function waLink(hp, text) {
 // ============================================================
 // akses & peran
 // ============================================================
-const roleLabel = { admin: "Administrator", pengurus: "Pengurus", security: "Security", warga: "Warga" };
-const canVerifikasi = (role) => role === "admin" || role === "pengurus";
-const canApprove = (role) => role === "admin" || role === "pengurus";
-const canKelolaAkses = (role) => role === "admin";
-const canCatatKeuangan = (role) => role === "admin" || role === "pengurus";
-const canKelolaDarurat = (role) => role === "admin" || role === "pengurus" || role === "security";
+const roleLabel = { pengurus: "Pengurus", security: "Security", warga: "Warga" };
+const canVerifikasi = (role) => role === "pengurus";
+const canApprove = (role) => role === "pengurus";
+const canKelolaAkses = (role) => role === "pengurus";
+const canCatatKeuangan = (role) => role === "pengurus";
+const canKelolaDarurat = (role) => role === "pengurus" || role === "security";
 
 // ============================================================
 // struktur kategori transaksi
@@ -148,6 +148,20 @@ const IPL_PER_BULAN = 200000;
 const REKENING_IPL = { bank: "Bank BCA", nomor: "1234567890", atasNama: "Bendahara" };
 const BUKTI_CONTOH = "https://images.unsplash.com/photo-1554224155-6726b3ff858f?w=200&q=60";
 
+// status organisasi — dropdown baku, dikelola admin lewat menu Akses
+const STATUS_OPTIONS = ["Ketua", "Bendahara", "Sekretaris", "Keamanan", "EO & Dokumentasi", "Security", "Warga"];
+const ROLE_OPTIONS = ["pengurus", "security", "warga"];
+
+// cari kontak utama (yang di-flag reminderIPL) untuk 1 rumah; fallback ke
+// penghuni pertama kalau belum ada yang di-flag sama sekali
+function getKontakUtama(wargaId, penggunaList) {
+  const penghuni = penggunaList.filter((p) => p.wargaId === wargaId);
+  return penghuni.find((p) => p.reminderIPL) || penghuni[0] || null;
+}
+function getPenghuniRumah(wargaId, penggunaList) {
+  return penggunaList.filter((p) => p.wargaId === wargaId);
+}
+
 const namaBlokTambahan = [
   ["Wahyu Hidayat", "C1"], ["Fitri Handayani", "C2"], ["Eko Prasetyo", "C3"], ["Maya Kusuma", "C4"],
   ["Andi Saputra", "D1"], ["Lina Marpaung", "D2"], ["Rudi Hartono", "D3"], ["Dian Permata", "D4"],
@@ -161,7 +175,7 @@ const namaBlokInti = [
   ["Bani", "A1"], ["Deri", "A2"], ["Agus Wijaya", "A3"], ["Dewi Lestari", "A4"],
   ["Hendra Gunawan", "B1"], ["Rina Marlina", "B2"], ["Joko Prasetyo", "B3"], ["Nur Aini", "B4"],
 ];
-const semuaNamaBlok = [...namaBlokInti, ...namaBlokTambahan]; // total 36 warga
+const semuaNamaBlok = [...namaBlokInti, ...namaBlokTambahan]; // total 36 rumah
 
 // pola tunggakan supaya data contoh realistis: sebagian warga menunggak 1-3 bulan,
 // sebagian sedang menunggu verifikasi bulan berjalan, sisanya lunas semua
@@ -170,7 +184,17 @@ const ARREARS_2 = new Set([2, 15, 28]);
 const ARREARS_1 = new Set([5, 9, 18, 31]);
 const MENUNGGU_BULAN_INI = new Set([0, 4, 12, 20, 25]);
 
-const seedWarga = semuaNamaBlok.map(([nama, blok], i) => {
+// `warga` = entitas RUMAH (bukan orang) — 1 baris per no. rumah (format
+// "SBT 01".."SBT 36"), jadi dasar kewajiban IPL. Nama & nomor HP penghuni
+// ada di `pengguna` (bisa lebih dari 1 orang per rumah). "Pos Security"
+// BUKAN bagian dari array ini karena tidak ikut tagihan IPL — security
+// ditampilkan dengan lokasi teks biasa, lihat WargaDirectoryView.
+const formatNoRumah = (i) => `SBT ${String(i + 1).padStart(2, "0")}`;
+// `kepemilikan` (Pemilik/Penyewa) dipasang per-orang di `pengguna`, BUKAN di
+// rumah — supaya kasus pemilik tidak tinggal di situ (disewakan) tetap bisa
+// tercatat: pemilik & penyewa sama-sama muncul di kartu rumah yang sama.
+const PENYEWA_INDEXES = new Set([2, 9, 14, 20, 27, 33]); // sebagian penghuni berstatus penyewa, sisanya pemilik
+const seedWarga = semuaNamaBlok.map(([_namaAwal], i) => {
   const arrears = ARREARS_3.has(i) ? 3 : ARREARS_2.has(i) ? 2 : ARREARS_1.has(i) ? 1 : 0;
   const menungguBulanIni = arrears === 0 && MENUNGGU_BULAN_INI.has(i);
   const statusBayar = {};
@@ -180,15 +204,12 @@ const seedWarga = semuaNamaBlok.map(([nama, blok], i) => {
     else statusBayar[monthKey] = { status: "lunas", bukti: null };
   });
   return {
-    id: `w${i + 1}`, nama, blok,
-    hp: `0812300000${String(i + 1).padStart(2, "0")}`,
-    iplPerBulan: IPL_PER_BULAN, statusBayar,
+    id: `w${i + 1}`,
+    noRumah: formatNoRumah(i),
+    iplPerBulan: IPL_PER_BULAN,
+    statusBayar,
   };
 });
-
-// nomor HP asli untuk 2 warga teratas — dipakai untuk tes notifikasi reminder WA
-seedWarga[0].hp = "08111666724"; // Bani, Blok A1
-seedWarga[1].hp = "082112578429"; // Deri, Blok A2
 
 const seedKegiatan = [
   {
@@ -255,7 +276,7 @@ const seedPemasukanDariIuran = seedWarga.flatMap((w) =>
     .map((monthKey) => ({
       id: `masuk-${w.id}-${monthKey}`, tipe: "masuk", tanggal: `${monthKey}-05`,
       kategori: "Pembayaran IPL", subkategori: null,
-      keterangan: `IPL ${monthLabel(monthKey)} — ${w.nama}`, jumlah: w.iplPerBulan,
+      keterangan: `IPL ${monthLabel(monthKey)} — ${w.noRumah}`, jumlah: w.iplPerBulan,
       wargaId: w.id, monthKey,
     }))
 );
@@ -274,18 +295,6 @@ const seedTransaksi = [
   { id: "t9", tipe: "keluar", tanggal: `${recentMonths[0]}-12`, kategori: "Iuran RT", subkategori: "Iuran Dana Kematian", keterangan: "Setoran dana kematian bulanan", jumlah: 300000 },
 ];
 
-const pengurus = [
-  { nama: "Pak Ridwan", jabatan: "Ketua", hp: "081210000001" },
-  { nama: "Pak Surya", jabatan: "Sekretaris", hp: "081210000002" },
-  { nama: "Pak Bayu", jabatan: "Bendahara", hp: "081210000003" },
-  { nama: "Pak Anwar", jabatan: "Keamanan", hp: "081210000004" },
-  { nama: "Pak Doni", jabatan: "EO & Dokumentasi", hp: "081210000005" },
-];
-const security = [
-  { nama: "Pak Sandi", jabatan: "Security", hp: "081220000001" },
-  { nama: "Pak Fajar", jabatan: "Security", hp: "081220000002" },
-  { nama: "Pak Ferial", jabatan: "Security", hp: "081220000003" },
-];
 const kontakEksternal = [
   { nama: "Damkar Kota Bogor", ket: "Kebakaran & penyelamatan, 24 jam", hp: "0251-8322100", wa: "85385104100" },
   { nama: "Polsek Bogor Barat", ket: "Kepolisian sektor", hp: "0251-8322054" },
@@ -296,22 +305,55 @@ const kontakEksternal = [
 ];
 
 const seedPengguna = [
-  { id: "u1", nama: "Admin Sistem", hp: "081200000000", role: "admin" },
-  { id: "u2", nama: "Pak Ridwan", hp: "081210000001", role: "pengurus" },
-  { id: "u3", nama: "Pak Surya", hp: "081210000002", role: "pengurus" },
-  { id: "u4", nama: "Pak Bayu", hp: "081210000003", role: "pengurus" },
-  { id: "u5", nama: "Pak Anwar", hp: "081210000004", role: "pengurus" },
-  { id: "u5b", nama: "Pak Doni", hp: "081210000005", role: "pengurus" },
-  { id: "u6", nama: "Pak Sandi", hp: "081220000001", role: "security" },
-  { id: "u7", nama: "Pak Fajar", hp: "081220000002", role: "security" },
-  { id: "u8", nama: "Pak Ferial", hp: "081220000003", role: "security" },
-  ...seedWarga.map((w) => ({ id: `u_${w.id}`, nama: w.nama, hp: w.hp, role: "warga" })),
+  { id: "u1", nama: "Admin Sistem", hp: "081200000000", role: "pengurus", jabatan: "" },
+  // pengurus juga penduduk asli — masing-masing dikaitkan ke rumahnya sendiri
+  // (SBT 05-09), bukan akun "melayang" tanpa alamat
+  { id: "u2", nama: "Pak Ridwan", hp: "081210000001", role: "pengurus", jabatan: "Ketua", wargaId: "w5", kepemilikan: "Pemilik", reminderIPL: true },
+  { id: "u3", nama: "Pak Surya", hp: "081210000002", role: "pengurus", jabatan: "Sekretaris", wargaId: "w6", kepemilikan: "Pemilik", reminderIPL: true },
+  { id: "u4", nama: "Pak Bayu", hp: "081210000003", role: "pengurus", jabatan: "Bendahara", wargaId: "w7", kepemilikan: "Penyewa", reminderIPL: true },
+  { id: "u5", nama: "Pak Anwar", hp: "081210000004", role: "pengurus", jabatan: "Keamanan", wargaId: "w8", kepemilikan: "Pemilik", reminderIPL: true },
+  { id: "u5b", nama: "Pak Doni", hp: "081210000005", role: "pengurus", jabatan: "EO & Dokumentasi", wargaId: "w9", kepemilikan: "Pemilik", reminderIPL: true },
+  // contoh: istri Pak Ridwan ikut tinggal di rumah yang sama (SBT 05) —
+  // statusnya "Warga" biasa, bukan "Pengurus", walau serumah dengan Ketua
+  { id: "u_w5b", nama: "Istri Pak Ridwan", hp: "081210000099", role: "warga", jabatan: "", kepemilikan: "Pemilik", wargaId: "w5", reminderIPL: false },
+  { id: "u6", nama: "Pak Sandi", hp: "081220000001", role: "security", jabatan: "" },
+  { id: "u7", nama: "Pak Fajar", hp: "081220000002", role: "security", jabatan: "" },
+  { id: "u8", nama: "Pak Ferial", hp: "081220000003", role: "security", jabatan: "" },
+  // penghuni tiap rumah — nama & no.hp asli penghuni ada DI SINI (bukan di
+  // `warga`), supaya 1 rumah bisa punya lebih dari 1 akun (suami/istri/dll).
+  // `reminderIPL: true` menandai siapa yang jadi kontak utama penagihan —
+  // cuma boleh 1 orang per rumah (dijaga lewat function updateWargaLengkap).
+  // Rumah w5-w9 SUDAH dihuni pengurus (lihat atas), jadi di-skip di sini
+  // supaya tidak ada 2 "kontak utama" berebutan di rumah yang sama.
+  ...semuaNamaBlok
+    .map(([nama], i) => ({
+      id: `u_w${i + 1}`,
+      nama,
+      hp: `0812300000${String(i + 1).padStart(2, "0")}`,
+      role: "warga",
+      jabatan: "",
+      kepemilikan: PENYEWA_INDEXES.has(i) ? "Penyewa" : "Pemilik",
+      wargaId: `w${i + 1}`,
+      reminderIPL: true,
+    }))
+    .filter((p) => !["w5", "w6", "w7", "w8", "w9"].includes(p.wargaId)),
+  // contoh SBT 03: rumah disewakan — Agus & istri tinggal di situ sebagai
+  // penyewa (Agus jadi kontak utama IPL), pemilik aslinya (Budiman) tidak
+  // tinggal di situ tapi tetap tercatat sebagai pemilik rumah tersebut
+  { id: "u_w3b", nama: "Istri Agus Wijaya", hp: "081230000099", role: "warga", jabatan: "", kepemilikan: "Penyewa", wargaId: "w3", reminderIPL: false },
+  { id: "u_w3c", nama: "Budiman", hp: "081230000098", role: "warga", jabatan: "", kepemilikan: "Pemilik", wargaId: "w3", reminderIPL: false },
 ];
+
+// nomor HP asli untuk 2 penghuni teratas — dipakai untuk tes notifikasi reminder WA
+seedPengguna.find((p) => p.id === "u_w1").hp = "08111666724"; // Bani, Blok A1
+seedPengguna.find((p) => p.id === "u_w2").hp = "082112578429"; // Deri, Blok A2
 
 const issueOptions = ["Keamanan / Mencurigakan", "Kebakaran", "Medis / Kesehatan", "Konflik Warga", "Lainnya"];
 
 // status aktivitas darurat — dibuat sederhana: Baru -> Diproses -> Selesai
 const ALARM_STATUS = ["Baru", "Diproses", "Selesai"];
+// daftar jabatan default (khusus pengurus) — bisa ditambah/diubah/dihapus admin di menu Warga
+const JABATAN_OPTIONS_DEFAULT = ["Ketua", "Sekretaris", "Bendahara", "Keamanan", "EO & Dokumentasi"];
 
 const seedAlarmLog = [
   { id: "al1", tanggal: `${recentMonths[0]}-02`, waktu: "21:14:03", pelapor: "Rina Marlina", issue: "Keamanan / Mencurigakan — ada orang tidak dikenal mondar-mandir di depan Blok B", status: "Selesai", ditanganiOleh: "Pak Sandi" },
@@ -359,7 +401,7 @@ function alarmStatusColor(status) {
 // ============================================================
 // storage
 // ============================================================
-const KEYS = { warga: "sbt:warga:v4", transaksi: "sbt:transaksi:v3", kegiatan: "sbt:kegiatan:v3", alarm: "sbt:alarmlog:v4", pengguna: "sbt:pengguna:v4", absensi: "sbt:absensi:v1" };
+const KEYS = { warga: "sbt:warga:v5", transaksi: "sbt:transaksi:v3", kegiatan: "sbt:kegiatan:v3", alarm: "sbt:alarmlog:v4", pengguna: "sbt:pengguna:v7", absensi: "sbt:absensi:v1", jabatanOptions: "sbt:jabatanoptions:v1" };
 async function loadKey(key, fallback) {
   try {
     if (typeof window !== "undefined" && window.storage) {
@@ -457,17 +499,39 @@ function SegmentedControl({ options, value, onChange }) {
   );
 }
 
-function TxCard({ t }) {
+function TxCard({ t, onEdit, onDelete }) {
+  const [confirming, setConfirming] = useState(false);
   return (
-    <div style={{ padding: "12px 20px", borderBottom: `1px solid ${COLORS.divider}`, display: "flex", justifyContent: "space-between", gap: 12 }}>
-      <div style={{ minWidth: 0 }}>
-        <div className="mono" style={{ fontSize: 12, color: COLORS.inkSoft, marginBottom: 3 }}>{t.tanggal}</div>
-        <div style={{ fontSize: 13.5, fontWeight: 600, marginBottom: 2 }}>{t.keterangan}</div>
-        <div style={{ fontSize: 11.5, color: COLORS.inkFaint }}>{t.kategori}{t.subkategori ? ` · ${t.subkategori}` : ""}</div>
+    <div style={{ padding: "12px 20px", borderBottom: `1px solid ${COLORS.divider}` }}>
+      <div style={{ display: "flex", justifyContent: "space-between", gap: 12 }}>
+        <div style={{ minWidth: 0 }}>
+          <div className="mono" style={{ fontSize: 12, color: COLORS.inkSoft, marginBottom: 3 }}>{t.tanggal}</div>
+          <div style={{ fontSize: 13.5, fontWeight: 600, marginBottom: 2 }}>{t.keterangan}</div>
+          <div style={{ fontSize: 11.5, color: COLORS.inkFaint }}>{t.kategori}{t.subkategori ? ` · ${t.subkategori}` : ""}</div>
+        </div>
+        <div style={{ display: "flex", alignItems: "flex-start", gap: 8, flexShrink: 0 }}>
+          <div className="mono" style={{ fontWeight: 700, fontSize: 13.5, color: t.tipe === "masuk" ? COLORS.success : COLORS.danger, whiteSpace: "nowrap" }}>
+            {t.tipe === "masuk" ? "+" : "−"}{formatRp(t.jumlah)}
+          </div>
+          {!confirming && onEdit && (
+            <button onClick={onEdit} aria-label="Edit" style={{ background: COLORS.bg, border: "none", borderRadius: 999, width: 24, height: 24, cursor: "pointer", color: COLORS.inkSoft, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+              <Pencil size={11} />
+            </button>
+          )}
+          {!confirming && onDelete && (
+            <button onClick={() => setConfirming(true)} aria-label="Hapus" style={{ background: COLORS.dangerSoft, border: "none", borderRadius: 999, width: 24, height: 24, cursor: "pointer", color: COLORS.danger, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+              <Trash2 size={11} />
+            </button>
+          )}
+        </div>
       </div>
-      <div className="mono" style={{ flexShrink: 0, fontWeight: 700, fontSize: 13.5, color: t.tipe === "masuk" ? COLORS.success : COLORS.danger, whiteSpace: "nowrap" }}>
-        {t.tipe === "masuk" ? "+" : "−"}{formatRp(t.jumlah)}
-      </div>
+      {confirming && (
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", gap: 8, marginTop: 8 }}>
+          <span style={{ fontSize: 12, color: COLORS.inkSoft, marginRight: "auto" }}>Hapus transaksi ini?</span>
+          <Btn variant="danger" onClick={() => { onDelete(); setConfirming(false); }} style={{ padding: "5px 12px", fontSize: 12 }}>Ya, Hapus</Btn>
+          <Btn variant="ghost" onClick={() => setConfirming(false)} style={{ padding: "5px 12px", fontSize: 12 }}>Batal</Btn>
+        </div>
+      )}
     </div>
   );
 }
@@ -486,6 +550,7 @@ export default function SBTPintar() {
   const [kegiatan, setKegiatan] = useState(seedKegiatan);
   const [alarmLog, setAlarmLog] = useState(seedAlarmLog);
   const [absensiSecurity, setAbsensiSecurity] = useState(seedAbsensiSecurity);
+  const [jabatanOptions, setJabatanOptions] = useState(JABATAN_OPTIONS_DEFAULT);
   const [pengguna, setPengguna] = useState(seedPengguna);
   const [loggedInUser, setLoggedInUser] = useState(null);
   const role = loggedInUser?.role || null;
@@ -498,11 +563,13 @@ export default function SBTPintar() {
   }, [role, tab]);
   const [laporanBulan, setLaporanBulan] = useState(currentMonthKey);
   const [showExpenseForm, setShowExpenseForm] = useState(false);
+  const [editingExpense, setEditingExpense] = useState(null);
   const [showKegiatanForm, setShowKegiatanForm] = useState(false);
   const [editingKegiatan, setEditingKegiatan] = useState(null);
   const [kegiatanDetail, setKegiatanDetail] = useState(null);
   const [showPanicForm, setShowPanicForm] = useState(false);
   const [showAddUser, setShowAddUser] = useState(false);
+  const [editingWarga, setEditingWarga] = useState(null);
   const [showPayModal, setShowPayModal] = useState(false);
   const [cellModal, setCellModal] = useState(null); // { warga, monthKey }
   const [gridFilter, setGridFilter] = useState("semua");
@@ -518,10 +585,10 @@ export default function SBTPintar() {
     document.head.appendChild(link);
 
     (async () => {
-      const [w, t, k, a, p, abs] = await Promise.all([
+      const [w, t, k, a, p, abs, so] = await Promise.all([
         loadKey(KEYS.warga, null), loadKey(KEYS.transaksi, null),
         loadKey(KEYS.kegiatan, null), loadKey(KEYS.alarm, null), loadKey(KEYS.pengguna, null),
-        loadKey(KEYS.absensi, null),
+        loadKey(KEYS.absensi, null), loadKey(KEYS.jabatanOptions, null),
       ]);
       if (w) setWarga(w); else saveKey(KEYS.warga, seedWarga);
       if (t) setTransaksi(t); else saveKey(KEYS.transaksi, seedTransaksi);
@@ -529,6 +596,7 @@ export default function SBTPintar() {
       if (a) setAlarmLog(a); else saveKey(KEYS.alarm, seedAlarmLog);
       if (p) setPengguna(p); else saveKey(KEYS.pengguna, seedPengguna);
       if (abs) setAbsensiSecurity(abs); else saveKey(KEYS.absensi, seedAbsensiSecurity);
+      if (so) setJabatanOptions(so); else saveKey(KEYS.jabatanOptions, JABATAN_OPTIONS_DEFAULT);
       setLoading(false);
     })();
   }, []);
@@ -549,17 +617,17 @@ export default function SBTPintar() {
   function handleLogin(hp, pin) {
     const cleanHp = normalizeHp(hp);
     const found = pengguna.find((p) => normalizeHp(p.hp) === cleanHp);
-    if (!found) return { ok: false, message: "No. HP tidak terdaftar. Hubungi Administrator untuk didaftarkan di menu Akses." };
+    if (!found) return { ok: false, message: "No. HP tidak terdaftar. Hubungi Pengurus untuk didaftarkan di menu Warga." };
     if (pin !== DEMO_PIN) return { ok: false, message: `PIN salah. (Demo: gunakan PIN ${DEMO_PIN} untuk akun mana pun.)` };
     setLoggedInUser(found);
     return { ok: true };
   }
   function handleLogout() { setLoggedInUser(null); }
 
-  // warga yang sedang login (kalau role === 'warga')
+  // warga (rumah) milik user yang sedang login (kalau role === 'warga')
   const myWarga = useMemo(() => {
     if (!loggedInUser || loggedInUser.role !== "warga") return null;
-    return warga.find((w) => `u_${w.id}` === loggedInUser.id) || null;
+    return warga.find((w) => w.id === loggedInUser.wargaId) || null;
   }, [loggedInUser, warga]);
 
   // ---- Iuran IPL ----
@@ -585,7 +653,7 @@ export default function SBTPintar() {
       return next;
     });
     setTransaksi((prev) => {
-      const next = [...prev, { id: uid(), tipe: "masuk", tanggal: todayISO(), kategori: "Pembayaran IPL", subkategori: null, keterangan: `IPL ${monthLabel(monthKey)} — ${w ? w.nama : ""}`, jumlah: w ? w.iplPerBulan : IPL_PER_BULAN, wargaId, monthKey }];
+      const next = [...prev, { id: uid(), tipe: "masuk", tanggal: todayISO(), kategori: "Pembayaran IPL", subkategori: null, keterangan: `IPL ${monthLabel(monthKey)} — ${w ? w.noRumah : ""}`, jumlah: w ? w.iplPerBulan : IPL_PER_BULAN, wargaId, monthKey }];
       saveKey(KEYS.transaksi, next);
       return next;
     });
@@ -604,11 +672,31 @@ export default function SBTPintar() {
       return next;
     });
   }, []);
+  const updateWargaLengkap = (id, data) => {
+    setPengguna((prev) => {
+      let next = prev.map((p) => p.id === id ? { ...p, ...data } : p);
+      // kalau kontak utama baru di-set true, pastikan cuma 1 kontak utama per rumah
+      if (data.reminderIPL && data.wargaId) {
+        next = next.map((p) => (p.wargaId === data.wargaId && p.id !== id) ? { ...p, reminderIPL: false } : p);
+      }
+      saveKey(KEYS.pengguna, next);
+      return next;
+    });
+    setToast("Data warga diperbarui.");
+  };
 
   // ---- Pengeluaran ----
   const addExpense = (data) => {
     setTransaksi((prev) => { const next = [...prev, { id: uid(), tipe: "keluar", ...data }]; saveKey(KEYS.transaksi, next); return next; });
     setShowExpenseForm(false);
+  };
+  const updateExpense = (id, data) => {
+    setTransaksi((prev) => { const next = prev.map((t) => t.id === id ? { ...t, ...data } : t); saveKey(KEYS.transaksi, next); return next; });
+    setToast("Pengeluaran diperbarui.");
+  };
+  const deleteExpense = (id) => {
+    setTransaksi((prev) => { const next = prev.filter((t) => t.id !== id); saveKey(KEYS.transaksi, next); return next; });
+    setToast("Pengeluaran dihapus.");
   };
 
   // ---- Kegiatan & Notulensi ----
@@ -652,7 +740,7 @@ export default function SBTPintar() {
       return next;
     });
     setShowPanicForm(false);
-    setToast(`Alarm terkirim! Notifikasi dikirim ke ${pengurus.length} pengurus & ${security.length} security untuk followup.`);
+    setToast(`Alarm terkirim! Notifikasi dikirim ke ${pengguna.filter((p) => p.role === "pengurus").length} pengurus & ${pengguna.filter((p) => p.role === "security").length} security untuk followup.`);
   };
   const updateAlarmStatus = (id, status) => {
     setAlarmLog((prev) => {
@@ -676,9 +764,37 @@ export default function SBTPintar() {
   const updatePenggunaRole = (id, newRole) => {
     setPengguna((prev) => { const next = prev.map((p) => p.id === id ? { ...p, role: newRole } : p); saveKey(KEYS.pengguna, next); return next; });
   };
+  const updatePenggunaJabatan = (id, jabatan) => {
+    setPengguna((prev) => { const next = prev.map((p) => p.id === id ? { ...p, jabatan } : p); saveKey(KEYS.pengguna, next); return next; });
+  };
+  const deletePengguna = (id) => {
+    setPengguna((prev) => { const next = prev.filter((p) => p.id !== id); saveKey(KEYS.pengguna, next); return next; });
+    setToast("Pengguna dihapus.");
+  };
   const addPengguna = (data) => {
-    setPengguna((prev) => { const next = [...prev, { id: uid(), ...data }]; saveKey(KEYS.pengguna, next); return next; });
+    setPengguna((prev) => { const next = [...prev, { id: uid(), status: "", ...data }]; saveKey(KEYS.pengguna, next); return next; });
     setShowAddUser(false);
+  };
+
+  // ---- kelola daftar status/jabatan ----
+  const addJabatanOption = (label) => {
+    const clean = label.trim();
+    if (!clean || jabatanOptions.includes(clean)) return;
+    setJabatanOptions((prev) => { const next = [...prev, clean]; saveKey(KEYS.jabatanOptions, next); return next; });
+  };
+  const renameJabatanOption = (oldLabel, newLabel) => {
+    const clean = newLabel.trim();
+    if (!clean || clean === oldLabel) return;
+    setJabatanOptions((prev) => { const next = prev.map((s) => s === oldLabel ? clean : s); saveKey(KEYS.jabatanOptions, next); return next; });
+    setPengguna((prev) => { const next = prev.map((p) => p.jabatan === oldLabel ? { ...p, jabatan: clean } : p); saveKey(KEYS.pengguna, next); return next; });
+  };
+  const deleteJabatanOption = (label) => {
+    const dipakai = pengguna.some((p) => p.jabatan === label);
+    if (dipakai) {
+      setToast(`Tidak bisa hapus "${label}" — masih dipakai pengguna. Ganti status pengguna itu dulu.`);
+      return;
+    }
+    setJabatanOptions((prev) => { const next = prev.filter((s) => s !== label); saveKey(KEYS.jabatanOptions, next); return next; });
   };
 
   // ---- computed ----
@@ -700,7 +816,6 @@ export default function SBTPintar() {
     });
     return Object.entries(map).sort((a, b) => b[1] - a[1]);
   }, [laporanTx]);
-  const semuaPengeluaran = useMemo(() => [...transaksi].filter((t) => t.tipe === "keluar").sort((a, b) => b.tanggal.localeCompare(a.tanggal)), [transaksi]);
 
   // arrears streak (jumlah bulan menunggak berturut-turut dari bulan ini mundur)
   function arrearsStreak(w) {
@@ -729,7 +844,7 @@ export default function SBTPintar() {
     { id: "kegiatan", label: "Kegiatan", icon: CalendarDays },
     { id: "darurat", label: "Kontak Darurat", icon: Siren },
     { id: "absensi", label: "Absensi Security", icon: ClipboardCheck },
-    ...(canKelolaAkses(role) ? [{ id: "akses", label: "Akses", icon: UserCog }] : []),
+    { id: "warga", label: "Warga", icon: UserCog },
   ];
 
   if (loading) {
@@ -866,16 +981,21 @@ export default function SBTPintar() {
                   <table style={{ minWidth: 720 }}>
                     <thead>
                       <tr>
-                        <th style={{ position: "sticky", left: 0, background: COLORS.card, minWidth: 170 }}>Warga</th>
+                        <th style={{ position: "sticky", left: 0, background: COLORS.card, minWidth: 170 }}>Rumah</th>
                         {months12Asc.map((mk) => <th key={mk} style={{ textAlign: "center" }}>{monthLabelShort(mk)}</th>)}
                       </tr>
                     </thead>
                     <tbody>
-                      {gridWarga.map((w) => (
+                      {gridWarga.map((w) => {
+                        const kontakUtama = getKontakUtama(w.id, pengguna);
+                        const penghuni = getPenghuniRumah(w.id, pengguna);
+                        return (
                         <tr key={w.id}>
                           <td style={{ position: "sticky", left: 0, background: COLORS.card }}>
-                            <div style={{ fontWeight: 600 }}>{w.nama}</div>
-                            <div className="mono" style={{ fontSize: 11.5, color: COLORS.inkSoft }}>Blok {w.blok}</div>
+                            <div style={{ fontWeight: 600 }}>{kontakUtama ? kontakUtama.nama : "—"}</div>
+                            <div className="mono" style={{ fontSize: 11.5, color: COLORS.inkSoft }}>
+                              {w.noRumah}{penghuni.length > 1 ? ` · +${penghuni.length - 1} lagi` : ""}
+                            </div>
                           </td>
                           {months12Asc.map((mk) => {
                             const st = w.statusBayar[mk]?.status || "belum";
@@ -887,14 +1007,15 @@ export default function SBTPintar() {
                             const { bg, fg, Icon } = map[st];
                             return (
                               <td key={mk} style={{ textAlign: "center" }}>
-                                <button className="grid-cell" style={{ background: bg, color: fg }} onClick={() => setCellModal({ warga: w, monthKey: mk })} aria-label={`${w.nama} — ${monthLabel(mk)} — ${st}`}>
+                                <button className="grid-cell" style={{ background: bg, color: fg }} onClick={() => setCellModal({ warga: w, monthKey: mk, kontakUtama })} aria-label={`${kontakUtama ? kontakUtama.nama : w.noRumah} — ${monthLabel(mk)} — ${st}`}>
                                   <Icon size={16} strokeWidth={2.4} />
                                 </button>
                               </td>
                             );
                           })}
                         </tr>
-                      ))}
+                        );
+                      })}
                       {gridWarga.length === 0 && <tr><td colSpan={13} style={{ textAlign: "center", color: COLORS.inkSoft, padding: 24 }}>Tidak ada warga pada filter ini.</td></tr>}
                     </tbody>
                   </table>
@@ -909,11 +1030,10 @@ export default function SBTPintar() {
               <SectionTitle
                 title="Kegiatan &amp; Notulensi"
                 subtitle={!canApprove(role) ? "Dokumentasi dari pengurus — tampilan lihat saja" : undefined}
-                action={canApprove(role) ? <Btn onClick={() => setShowKegiatanForm(true)}><Plus size={15} /> Tambah Catatan</Btn> : undefined}
               />
               {showKegiatanForm && <KegiatanForm onCancel={() => setShowKegiatanForm(false)} onSubmit={addKegiatan} />}
               {editingKegiatan && <KegiatanForm initial={editingKegiatan} onCancel={() => setEditingKegiatan(null)} onSubmit={(data) => editKegiatan(editingKegiatan.id, data)} />}
-              <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+              <div style={{ display: "flex", flexDirection: "column", gap: 12, paddingBottom: canApprove(role) ? 90 : 0 }}>
                 {kegiatan.map((k) => {
                   const { text: preview, truncated } = truncateText(k.isi, 160);
                   const showExpand = truncated || !!k.foto;
@@ -948,6 +1068,13 @@ export default function SBTPintar() {
                 })}
                 {kegiatan.length === 0 && <div style={{ color: COLORS.inkSoft, padding: 20, textAlign: "center" }}>Belum ada catatan kegiatan atau notulensi.</div>}
               </div>
+              {canApprove(role) && (
+                <div className="fab-btn">
+                  <Btn pill onClick={() => setShowKegiatanForm(true)} style={{ boxShadow: "0 10px 24px rgba(228,113,30,0.35)", fontSize: 15, padding: "13px 22px" }}>
+                    <Plus size={16} /> Tambah Catatan
+                  </Btn>
+                </div>
+              )}
             </>
           )}
 
@@ -986,19 +1113,18 @@ export default function SBTPintar() {
                 </div>
               </Card>
 
-              <Card style={{ marginBottom: 20 }}>
-                <div style={{ padding: "16px 20px", borderBottom: `1px solid ${COLORS.divider}`, display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 8 }}>
-                  <span style={{ fontWeight: 700, fontSize: 15.5 }}>Riwayat Seluruh Pengeluaran</span>
-                  {canCatatKeuangan(role) && <Btn className="no-print" onClick={() => setShowExpenseForm(!showExpenseForm)} style={{ padding: "7px 14px", fontSize: 12.5 }}><Plus size={14} /> Catat Pengeluaran</Btn>}
+              {(showExpenseForm || editingExpense) && canCatatKeuangan(role) && (
+                <div className="no-print" style={{ marginBottom: 20 }}>
+                  <ExpenseFormInline
+                    initial={editingExpense}
+                    onCancel={() => { setShowExpenseForm(false); setEditingExpense(null); }}
+                    onSubmit={(data) => {
+                      if (editingExpense) { updateExpense(editingExpense.id, data); setEditingExpense(null); }
+                      else { addExpense(data); }
+                    }}
+                  />
                 </div>
-                {showExpenseForm && canCatatKeuangan(role) && (
-                  <div className="no-print" style={{ padding: 18 }}><ExpenseFormInline onCancel={() => setShowExpenseForm(false)} onSubmit={addExpense} /></div>
-                )}
-                <div>
-                  {semuaPengeluaran.map((t) => <TxCard key={t.id} t={t} />)}
-                  {semuaPengeluaran.length === 0 && <EmptyRow text="Belum ada pengeluaran tercatat." />}
-                </div>
-              </Card>
+              )}
 
               <Card style={{ marginBottom: 20 }}>
                 <div style={{ padding: "16px 20px", borderBottom: `1px solid ${COLORS.divider}`, fontWeight: 700, fontSize: 15.5, color: COLORS.success }}>Rincian Pemasukan (IPL) — {monthLabel(laporanBulan)}</div>
@@ -1018,10 +1144,25 @@ export default function SBTPintar() {
               <Card>
                 <div style={{ padding: "16px 20px", borderBottom: `1px solid ${COLORS.divider}`, fontWeight: 700, fontSize: 15.5, color: COLORS.danger }}>Rincian Pengeluaran — {monthLabel(laporanBulan)}</div>
                 <div>
-                  {laporanTx.filter((t) => t.tipe === "keluar").sort((a, b) => a.tanggal.localeCompare(b.tanggal)).map((t) => <TxCard key={t.id} t={t} />)}
+                  {laporanTx.filter((t) => t.tipe === "keluar").sort((a, b) => a.tanggal.localeCompare(b.tanggal)).map((t) => (
+                    <TxCard
+                      key={t.id}
+                      t={t}
+                      onEdit={canCatatKeuangan(role) ? () => { setEditingExpense(t); setShowExpenseForm(false); } : undefined}
+                      onDelete={canCatatKeuangan(role) ? () => deleteExpense(t.id) : undefined}
+                    />
+                  ))}
                   {laporanTx.filter((t) => t.tipe === "keluar").length === 0 && <EmptyRow text="Belum ada pengeluaran bulan ini." />}
                 </div>
               </Card>
+              {canCatatKeuangan(role) && <div style={{ height: 80 }} />}
+              {canCatatKeuangan(role) && (
+                <div className="fab-btn no-print">
+                  <Btn pill onClick={() => setShowExpenseForm(!showExpenseForm)} style={{ boxShadow: "0 10px 24px rgba(228,113,30,0.35)", fontSize: 15, padding: "13px 22px" }}>
+                    <Plus size={16} /> Catat Pengeluaran
+                  </Btn>
+                </div>
+              )}
             </>
           )}
 
@@ -1040,11 +1181,11 @@ export default function SBTPintar() {
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, marginBottom: 20 }}>
                 <Card style={{ padding: 18 }}>
                   <div style={{ fontWeight: 700, fontSize: 15.5, marginBottom: 12 }}>Pengurus</div>
-                  {pengurus.map((p) => <ContactRow key={p.hp} {...p} />)}
+                  {pengguna.filter((p) => p.role === "pengurus").map((p) => <ContactRow key={p.id} nama={p.nama} jabatan={p.jabatan} hp={p.hp} />)}
                 </Card>
                 <Card style={{ padding: 18 }}>
                   <div style={{ fontWeight: 700, fontSize: 15.5, marginBottom: 12 }}>Security</div>
-                  {security.map((p) => <ContactRow key={p.hp} {...p} />)}
+                  {pengguna.filter((p) => p.role === "security").map((p) => <ContactRow key={p.id} nama={p.nama} jabatan={p.jabatan} hp={p.hp} />)}
                 </Card>
               </div>
 
@@ -1103,31 +1244,77 @@ export default function SBTPintar() {
             />
           )}
 
-          {tab === "akses" && canKelolaAkses(role) && (
+          {tab === "warga" && (
             <>
-              <SectionTitle title="Kelola Akses Pengguna" action={<Btn onClick={() => setShowAddUser(!showAddUser)}><Plus size={15} /> Tambah Pengguna</Btn>} />
-              <Card style={{ padding: 16, marginBottom: 18, fontSize: 12.5, color: COLORS.inkSoft }}>
-                <b>Administrator</b>: kelola pengguna &amp; peran, akses penuh. <b>Pengurus</b>: akses penuh termasuk verifikasi IPL &amp; persetujuan konten. <b>Security</b>: seperti pengurus untuk urusan darurat, tapi tidak bisa verifikasi pembayaran, approval konten, atau kelola akses. <b>Warga</b>: semua fitur kecuali verifikasi, persetujuan, dan kelola akses.
-              </Card>
-              {showAddUser && <AddUserForm onCancel={() => setShowAddUser(false)} onSubmit={addPengguna} />}
-              <Card>
-                <div>
-                  {pengguna.map((p) => (
-                    <div key={p.id} style={{ padding: "12px 20px", borderBottom: `1px solid ${COLORS.divider}`, display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10 }}>
-                      <div style={{ minWidth: 0 }}>
-                        <div style={{ fontWeight: 600, fontSize: 13.5 }}>{p.nama}</div>
-                        <div className="mono" style={{ fontSize: 12, color: COLORS.inkSoft }}>{p.hp}</div>
-                      </div>
-                      <select value={p.role} onChange={(e) => updatePenggunaRole(p.id, e.target.value)} style={{ ...inputStyle, padding: "6px 10px", fontSize: 12.5, flexShrink: 0 }}>
-                        <option value="admin">Administrator</option>
-                        <option value="pengurus">Pengurus</option>
-                        <option value="security">Security</option>
-                        <option value="warga">Warga</option>
-                      </select>
-                    </div>
-                  ))}
+              <SectionTitle title="Warga" subtitle="Daftar penghuni per rumah, urut SBT 01 → SBT 36" />
+
+              {canKelolaAkses(role) && (
+                <Card style={{ padding: 16, marginBottom: 18, fontSize: 12.5, color: COLORS.inkSoft }}>
+                  <b>Status</b> menentukan akses fitur sekaligus posisi di data penduduk: <b>Pengurus</b> (akses penuh: verifikasi IPL, persetujuan konten, kelola warga), <b>Security</b> (akses urusan darurat & absensi jaga saja), <b>Warga</b> (akses dasar warga biasa).
+                  <br /><br />
+                  <b>Jabatan</b> cuma berlaku untuk Pengurus (Ketua, Bendahara, dst) — murni struktur organisasi. 1 rumah bisa punya lebih dari 1 akun (misal suami & istri); tandai salah satu sebagai <b>Kontak Utama IPL</b> supaya reminder pembayaran cuma nyasar ke 1 nomor.
+                </Card>
+              )}
+
+              {canKelolaAkses(role) && (
+                <JabatanOptionsManager
+                  jabatanOptions={jabatanOptions}
+                  onAdd={addJabatanOption}
+                  onRename={renameJabatanOption}
+                  onDelete={deleteJabatanOption}
+                />
+              )}
+
+              {canKelolaAkses(role) && showAddUser && (
+                <AddUserForm
+                  warga={warga}
+                  pengguna={pengguna}
+                  jabatanOptions={jabatanOptions}
+                  onAddJabatan={addJabatanOption}
+                  onCancel={() => setShowAddUser(false)}
+                  onSubmit={addPengguna}
+                />
+              )}
+
+              <div style={{ display: "flex", flexDirection: "column", gap: 14, paddingBottom: canKelolaAkses(role) ? 90 : 0 }}>
+                {warga.map((w) => (
+                  <RumahCard
+                    key={w.id}
+                    rumah={w}
+                    penghuni={getPenghuniRumah(w.id, pengguna)}
+                    canEdit={canKelolaAkses(role)}
+                    onEdit={setEditingWarga}
+                    onDelete={deletePengguna}
+                  />
+                ))}
+
+                <PosSecurityCard
+                  security={pengguna.filter((p) => p.role === "security")}
+                  canEdit={canKelolaAkses(role)}
+                  onEdit={setEditingWarga}
+                  onDelete={deletePengguna}
+                />
+              </div>
+
+              {editingWarga && (
+                <EditWargaModal
+                  data={editingWarga}
+                  warga={warga}
+                  pengguna={pengguna}
+                  jabatanOptions={jabatanOptions}
+                  onAddJabatan={addJabatanOption}
+                  onCancel={() => setEditingWarga(null)}
+                  onSubmit={(changes) => { updateWargaLengkap(editingWarga.id, changes); setEditingWarga(null); }}
+                />
+              )}
+
+              {canKelolaAkses(role) && (
+                <div className="fab-btn">
+                  <Btn pill onClick={() => setShowAddUser(true)} style={{ boxShadow: "0 10px 24px rgba(228,113,30,0.35)", fontSize: 15, padding: "13px 22px" }}>
+                    <Plus size={16} /> Tambah Warga
+                  </Btn>
                 </div>
-              </Card>
+              )}
             </>
           )}
         </main>
@@ -1177,7 +1364,7 @@ function WargaIuranView({ myWarga, onOpenPay }) {
     return (
       <>
         <SectionTitle title="Iuran IPL Saya" />
-        <Card style={{ padding: 24, textAlign: "center", color: COLORS.inkSoft }}>Data warga untuk akun ini belum terhubung. Hubungi Administrator.</Card>
+        <Card style={{ padding: 24, textAlign: "center", color: COLORS.inkSoft }}>Data warga untuk akun ini belum terhubung. Hubungi Pengurus.</Card>
       </>
     );
   }
@@ -1187,7 +1374,7 @@ function WargaIuranView({ myWarga, onOpenPay }) {
 
   return (
     <>
-      <SectionTitle title="Iuran IPL Saya" subtitle={`Blok ${myWarga.blok} · ${formatRp(myWarga.iplPerBulan)}/bulan`} />
+      <SectionTitle title="Iuran IPL Saya" subtitle={`${myWarga.noRumah} · ${formatRp(myWarga.iplPerBulan)}/bulan`} />
       <Card style={{ padding: 20, marginBottom: 18, display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 10 }}>
         <div>
           <div style={{ fontSize: 12.5, color: COLORS.inkSoft, fontWeight: 600 }}>{belumCount === 0 ? "Status Pembayaran" : "Total Tunggakan"}</div>
@@ -1307,9 +1494,10 @@ function PayIPLModal({ myWarga, onCancel, onSubmit }) {
 // Iuran IPL — modal aksi per sel (tampilan Admin/Pengurus)
 // ============================================================
 function IuranCellModal({ data, canVerifikasi, onClose, onVerifikasi, onBatalkan }) {
-  const { warga: w, monthKey } = data;
+  const { warga: w, monthKey, kontakUtama } = data;
   const entry = w.statusBayar[monthKey] || { status: "belum", bukti: null };
   const [buktiManual, setBuktiManual] = useState(null);
+  const namaTampil = kontakUtama ? kontakUtama.nama : w.noRumah;
 
   // seluruh bulan yang masih menunggak untuk warga ini (bukan cuma bulan yang diketuk),
   // supaya pengurus bisa kirim 1 pengingat untuk semua tunggakan sekaligus
@@ -1317,7 +1505,7 @@ function IuranCellModal({ data, canVerifikasi, onClose, onVerifikasi, onBatalkan
   const totalTunggakan = semuaBulanMenunggak.length * w.iplPerBulan;
   const daftarBulanMenunggak = semuaBulanMenunggak.map(monthLabel).join(", ");
 
-  const waTextSatuBulan = `Assalamualaikum Bpk/Ibu ${w.nama},
+  const waTextSatuBulan = `Assalamualaikum Bpk/Ibu ${namaTampil},
 mengingatkan iuran IPL ${monthLabel(monthKey)} sebesar ${formatRp(w.iplPerBulan)} belum kami terima.
 Mohon dapat diselesaikan.
 
@@ -1326,7 +1514,7 @@ ${REKENING_IPL.nomor}
 an ${REKENING_IPL.atasNama}
 
 Terima kasih, 🙏 — Pengurus.`;
-  const waTextSemua = `Assalamualaikum Bpk/Ibu ${w.nama},
+  const waTextSemua = `Assalamualaikum Bpk/Ibu ${namaTampil},
 mengingatkan iuran IPL yang masih tertunggak selama ${semuaBulanMenunggak.length} bulan (${daftarBulanMenunggak}) dengan total ${formatRp(totalTunggakan)} belum kami terima.
 Mohon dapat diselesaikan.
 
@@ -1341,8 +1529,8 @@ Terima kasih, 🙏 — Pengurus.`;
       <Card style={{ padding: 22, maxWidth: 360, width: "100%", maxHeight: "88vh", overflowY: "auto" }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
           <div>
-            <div style={{ fontWeight: 700, fontSize: 16.5 }}>{w.nama}</div>
-            <div style={{ fontSize: 12.5, color: COLORS.inkSoft }}>Blok {w.blok} · {monthLabel(monthKey)}</div>
+            <div style={{ fontWeight: 700, fontSize: 16.5 }}>{namaTampil}</div>
+            <div style={{ fontSize: 12.5, color: COLORS.inkSoft }}>{w.noRumah} · {monthLabel(monthKey)}</div>
           </div>
           <button onClick={onClose} style={{ background: COLORS.bg, border: "none", borderRadius: 999, width: 30, height: 30, cursor: "pointer", color: COLORS.inkSoft, display: "flex", alignItems: "center", justifyContent: "center" }}><X size={16} /></button>
         </div>
@@ -1383,13 +1571,18 @@ Terima kasih, 🙏 — Pengurus.`;
             </div>
           )}
 
-          {entry.status === "belum" && semuaBulanMenunggak.length > 1 && (
-            <a href={waLink(w.hp, waTextSemua)} target="_blank" rel="noreferrer" style={{ width: "100%" }}>
+          {entry.status === "belum" && !kontakUtama && (
+            <div style={{ fontSize: 12.5, color: COLORS.warning, background: COLORS.warningSoft, padding: "10px 12px", borderRadius: 10 }}>
+              Belum ada penghuni terdaftar untuk rumah ini — tidak bisa kirim pengingat WA. Tambahkan penghuni dulu lewat menu Akses.
+            </div>
+          )}
+          {entry.status === "belum" && kontakUtama && semuaBulanMenunggak.length > 1 && (
+            <a href={waLink(kontakUtama.hp, waTextSemua)} target="_blank" rel="noreferrer" style={{ width: "100%" }}>
               <Btn variant="ghost" style={{ width: "100%", padding: "11px 0" }}><Send size={14} /> Ingatkan Semua Tunggakan ({semuaBulanMenunggak.length} bln · {formatRp(totalTunggakan)})</Btn>
             </a>
           )}
-          {entry.status === "belum" && (
-            <a href={waLink(w.hp, waTextSatuBulan)} target="_blank" rel="noreferrer" style={{ width: "100%" }}>
+          {entry.status === "belum" && kontakUtama && (
+            <a href={waLink(kontakUtama.hp, waTextSatuBulan)} target="_blank" rel="noreferrer" style={{ width: "100%" }}>
               <Btn variant="ghost" style={{ width: "100%", padding: "11px 0" }}><Send size={14} /> Ingatkan {monthLabel(monthKey)} Saja</Btn>
             </a>
           )}
@@ -1596,6 +1789,137 @@ function AbsensiSecurityView({ absensiSecurity, role, namaAktif, onSubmit }) {
 // ============================================================
 // komponen lain
 // ============================================================
+function JabatanOptionsManager({ jabatanOptions, onAdd, onRename, onDelete }) {
+  const [open, setOpen] = useState(false);
+  const [newLabel, setNewLabel] = useState("");
+  const [editing, setEditing] = useState(null);
+  const [editValue, setEditValue] = useState("");
+
+  return (
+    <Card style={{ padding: 16, marginBottom: 18 }}>
+      <button onClick={() => setOpen(!open)} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", width: "100%", background: "none", border: "none", cursor: "pointer", padding: 0, fontWeight: 700, fontSize: 14 }}>
+        Kelola Daftar Jabatan
+        <span style={{ fontSize: 12, color: COLORS.accent, fontWeight: 600 }}>{open ? "Sembunyikan" : "Buka"}</span>
+      </button>
+      {open && (
+        <div style={{ marginTop: 14 }}>
+          <div style={{ display: "flex", flexDirection: "column", gap: 6, marginBottom: 12 }}>
+            {jabatanOptions.map((s) => (
+              <div key={s} style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                {editing === s ? (
+                  <>
+                    <input value={editValue} onChange={(e) => setEditValue(e.target.value)} style={{ ...inputStyle, padding: "6px 8px", fontSize: 12.5, flex: 1 }} />
+                    <Btn onClick={() => { onRename(s, editValue); setEditing(null); }} style={{ padding: "5px 10px", fontSize: 11.5 }}>Simpan</Btn>
+                    <Btn variant="ghost" onClick={() => setEditing(null)} style={{ padding: "5px 10px", fontSize: 11.5 }}>Batal</Btn>
+                  </>
+                ) : (
+                  <>
+                    <span style={{ flex: 1, fontSize: 13 }}>{s}</span>
+                    <button onClick={() => { setEditing(s); setEditValue(s); }} aria-label="Edit" style={{ background: COLORS.bg, border: "none", borderRadius: 999, width: 26, height: 26, cursor: "pointer", color: COLORS.inkSoft, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}><Pencil size={11} /></button>
+                    <button onClick={() => onDelete(s)} aria-label="Hapus" style={{ background: COLORS.dangerSoft, border: "none", borderRadius: 999, width: 26, height: 26, cursor: "pointer", color: COLORS.danger, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}><Trash2 size={11} /></button>
+                  </>
+                )}
+              </div>
+            ))}
+          </div>
+          <div style={{ display: "flex", gap: 6 }}>
+            <input value={newLabel} onChange={(e) => setNewLabel(e.target.value)} placeholder="Tambah status baru" style={{ ...inputStyle, padding: "8px 10px", fontSize: 12.5, flex: 1 }} />
+            <Btn onClick={() => { onAdd(newLabel); setNewLabel(""); }} style={{ padding: "8px 14px", fontSize: 12.5 }}><Plus size={13} /> Tambah</Btn>
+          </div>
+        </div>
+      )}
+    </Card>
+  );
+}
+
+function ResidentRow({ p, canEdit, onEdit, onDelete }) {
+  const [confirming, setConfirming] = useState(false);
+  const roleTampil = { pengurus: COLORS.accent, security: COLORS.warning, warga: COLORS.inkSoft };
+  const roleBgTampil = { pengurus: COLORS.accentSoft, security: COLORS.warningSoft, warga: COLORS.bg };
+  const roleLabelTampil = { pengurus: "Pengurus", security: "Security", warga: "Warga" };
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 8, padding: "10px 12px", borderRadius: 10, background: COLORS.bg }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 8, flexWrap: "wrap" }}>
+        <div style={{ minWidth: 0 }}>
+          <div style={{ fontWeight: 600, fontSize: 13.5 }}>
+            {p.nama}
+            {p.reminderIPL && <span style={{ marginLeft: 6, fontSize: 10.5, fontWeight: 700, color: COLORS.success }}>★ Kontak Utama</span>}
+          </div>
+        </div>
+        <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap", flexShrink: 0 }}>
+          {p.kepemilikan && (
+            <span style={{ fontSize: 10.5, fontWeight: 700, padding: "3px 9px", borderRadius: 999, background: p.kepemilikan === "Pemilik" ? COLORS.successSoft : COLORS.warningSoft, color: p.kepemilikan === "Pemilik" ? COLORS.success : COLORS.warning, whiteSpace: "nowrap" }}>
+              {p.kepemilikan}
+            </span>
+          )}
+          <span style={{ fontSize: 10.5, fontWeight: 700, padding: "3px 9px", borderRadius: 999, background: roleBgTampil[p.role], color: roleTampil[p.role], whiteSpace: "nowrap" }}>
+            {p.jabatan ? p.jabatan : roleLabelTampil[p.role]}
+          </span>
+        </div>
+      </div>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
+        <div className="mono" style={{ fontSize: 11.5, color: COLORS.inkSoft }}>{p.hp}</div>
+        <div style={{ display: "flex", gap: 6, flexShrink: 0 }}>
+          <a href={`tel:${p.hp}`}><Btn variant="ghost" style={{ padding: "6px 9px" }}><Phone size={12} /></Btn></a>
+          <a href={waLink(p.hp, "")} target="_blank" rel="noreferrer"><Btn variant="success" style={{ padding: "6px 9px" }}><MessageCircle size={12} /></Btn></a>
+        </div>
+      </div>
+      {canEdit && !confirming && (
+        <div style={{ display: "flex", gap: 6, justifyContent: "flex-end" }}>
+          <button onClick={() => onEdit(p)} aria-label="Edit" style={{ background: COLORS.card, border: `1px solid ${COLORS.divider}`, borderRadius: 999, width: 26, height: 26, cursor: "pointer", color: COLORS.inkSoft, display: "flex", alignItems: "center", justifyContent: "center" }}>
+            <Pencil size={12} />
+          </button>
+          <button onClick={() => setConfirming(true)} aria-label="Hapus" style={{ background: COLORS.dangerSoft, border: "none", borderRadius: 999, width: 26, height: 26, cursor: "pointer", color: COLORS.danger, display: "flex", alignItems: "center", justifyContent: "center" }}>
+            <Trash2 size={12} />
+          </button>
+        </div>
+      )}
+      {confirming && (
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", gap: 6 }}>
+          <span style={{ fontSize: 11.5, color: COLORS.inkSoft, marginRight: "auto" }}>Hapus {p.nama}?</span>
+          <Btn variant="danger" onClick={() => { onDelete(p.id); setConfirming(false); }} style={{ padding: "4px 10px", fontSize: 11 }}>Ya, Hapus</Btn>
+          <Btn variant="ghost" onClick={() => setConfirming(false)} style={{ padding: "4px 10px", fontSize: 11 }}>Batal</Btn>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function RumahCard({ rumah, penghuni, canEdit, onEdit, onDelete }) {
+  const kontakUtama = penghuni.find((p) => p.reminderIPL) || penghuni[0] || null;
+  return (
+    <Card style={{ padding: 18 }}>
+      <div style={{ fontWeight: 700, fontSize: 15.5, marginBottom: 4 }}>{rumah.noRumah}</div>
+      {kontakUtama && (
+        <div style={{ fontSize: 12, color: COLORS.inkFaint, marginBottom: 12 }}>
+          Kontak utama: <span style={{ color: COLORS.success, fontWeight: 700 }}>{kontakUtama.nama}</span> · {kontakUtama.hp}
+        </div>
+      )}
+      <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+        {penghuni.length === 0 && <div style={{ fontSize: 12.5, color: COLORS.inkFaint }}>Belum ada penghuni terdaftar.</div>}
+        {penghuni.map((p) => (
+          <ResidentRow key={p.id} p={p} canEdit={canEdit} onEdit={onEdit} onDelete={onDelete} />
+        ))}
+      </div>
+    </Card>
+  );
+}
+
+function PosSecurityCard({ security, canEdit, onEdit, onDelete }) {
+  return (
+    <Card style={{ padding: 18 }}>
+      <div style={{ fontWeight: 700, fontSize: 15.5, marginBottom: 12 }}>Pos Security</div>
+      <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+        {security.length === 0 && <div style={{ fontSize: 12.5, color: COLORS.inkFaint }}>Belum ada petugas security terdaftar.</div>}
+        {security.map((p) => (
+          <ResidentRow key={p.id} p={p} canEdit={canEdit} onEdit={onEdit} onDelete={onDelete} />
+        ))}
+      </div>
+    </Card>
+  );
+}
+
 function ContactRow({ nama, jabatan, hp }) {
   return (
     <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "10px 0", borderBottom: `1px solid ${COLORS.divider}` }}>
@@ -1620,12 +1944,12 @@ function FormShell({ title, onCancel, onSubmit, children }) {
   );
 }
 
-function ExpenseFormInline({ onCancel, onSubmit }) {
-  const [tanggal, setTanggal] = useState(todayISO());
-  const [kategori, setKategori] = useState(KATEGORI_PENGELUARAN_LIST[0]);
-  const [subkategori, setSubkategori] = useState(KATEGORI_PENGELUARAN[KATEGORI_PENGELUARAN_LIST[0]][0]);
-  const [keterangan, setKeterangan] = useState("");
-  const [jumlah, setJumlah] = useState("");
+function ExpenseFormInline({ onCancel, onSubmit, initial }) {
+  const [tanggal, setTanggal] = useState(initial?.tanggal || todayISO());
+  const [kategori, setKategori] = useState(initial?.kategori || KATEGORI_PENGELUARAN_LIST[0]);
+  const [subkategori, setSubkategori] = useState(initial?.subkategori || KATEGORI_PENGELUARAN[initial?.kategori || KATEGORI_PENGELUARAN_LIST[0]][0]);
+  const [keterangan, setKeterangan] = useState(initial?.keterangan || "");
+  const [jumlah, setJumlah] = useState(initial?.jumlah ? String(initial.jumlah) : "");
 
   function changeKategori(k) {
     setKategori(k);
@@ -1633,27 +1957,30 @@ function ExpenseFormInline({ onCancel, onSubmit }) {
   }
 
   return (
-    <form onSubmit={(e) => { e.preventDefault(); if (!keterangan || !jumlah) return; onSubmit({ tanggal, kategori, subkategori, keterangan, jumlah: Number(jumlah) }); }} style={{ display: "grid", gap: 12, border: `1px solid ${COLORS.divider}`, borderRadius: 12, padding: 16, background: COLORS.bg }}>
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-        <Field label="Tanggal"><input type="date" value={tanggal} onChange={(e) => setTanggal(e.target.value)} style={inputStyle} /></Field>
-        <Field label="Kategori">
-          <select value={kategori} onChange={(e) => changeKategori(e.target.value)} style={inputStyle}>
-            {KATEGORI_PENGELUARAN_LIST.map((k) => <option key={k} value={k}>{k}</option>)}
+    <div style={{ border: `1px solid ${initial ? COLORS.accent : COLORS.divider}`, borderRadius: 12, padding: 16, background: COLORS.bg }}>
+      {initial && <div style={{ fontWeight: 700, fontSize: 14, marginBottom: 12 }}>Edit Pengeluaran</div>}
+      <form onSubmit={(e) => { e.preventDefault(); if (!keterangan || !jumlah) return; onSubmit({ tanggal, kategori, subkategori, keterangan, jumlah: Number(jumlah) }); }} style={{ display: "grid", gap: 12 }}>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+          <Field label="Tanggal"><input type="date" value={tanggal} onChange={(e) => setTanggal(e.target.value)} style={inputStyle} /></Field>
+          <Field label="Kategori">
+            <select value={kategori} onChange={(e) => changeKategori(e.target.value)} style={inputStyle}>
+              {KATEGORI_PENGELUARAN_LIST.map((k) => <option key={k} value={k}>{k}</option>)}
+            </select>
+          </Field>
+        </div>
+        <Field label="Sub Kategori">
+          <select value={subkategori} onChange={(e) => setSubkategori(e.target.value)} style={inputStyle}>
+            {KATEGORI_PENGELUARAN[kategori].map((s) => <option key={s} value={s}>{s}</option>)}
           </select>
         </Field>
-      </div>
-      <Field label="Sub Kategori">
-        <select value={subkategori} onChange={(e) => setSubkategori(e.target.value)} style={inputStyle}>
-          {KATEGORI_PENGELUARAN[kategori].map((s) => <option key={s} value={s}>{s}</option>)}
-        </select>
-      </Field>
-      <Field label="Keterangan"><input value={keterangan} onChange={(e) => setKeterangan(e.target.value)} placeholder="mis. Gaji bulanan — Pak Sandi" style={inputStyle} /></Field>
-      <Field label="Jumlah (Rp)"><input type="number" value={jumlah} onChange={(e) => setJumlah(e.target.value)} placeholder="0" style={inputStyle} /></Field>
-      <div style={{ display: "flex", gap: 8 }}>
-        <Btn type="submit">Simpan Pengeluaran</Btn>
-        <Btn type="button" variant="ghost" onClick={onCancel}>Batal</Btn>
-      </div>
-    </form>
+        <Field label="Keterangan"><input value={keterangan} onChange={(e) => setKeterangan(e.target.value)} placeholder="mis. Gaji bulanan — Pak Sandi" style={inputStyle} /></Field>
+        <Field label="Jumlah (Rp)"><input type="number" value={jumlah} onChange={(e) => setJumlah(e.target.value)} placeholder="0" style={inputStyle} /></Field>
+        <div style={{ display: "flex", gap: 8 }}>
+          <Btn type="submit">{initial ? "Simpan Perubahan" : "Simpan Pengeluaran"}</Btn>
+          <Btn type="button" variant="ghost" onClick={onCancel}>Batal</Btn>
+        </div>
+      </form>
+    </div>
   );
 }
 
@@ -1731,23 +2058,205 @@ function KegiatanDetailModal({ k, onClose }) {
   );
 }
 
-function AddUserForm({ onCancel, onSubmit }) {
+function JabatanSelectField({ value, onChange, jabatanOptions, onAddJabatan }) {
+  const [addingNew, setAddingNew] = useState(false);
+  const [newLabel, setNewLabel] = useState("");
+
+  function handleSelectChange(e) {
+    if (e.target.value === "__new__") { setAddingNew(true); return; }
+    onChange(e.target.value);
+  }
+  function confirmAdd() {
+    const clean = newLabel.trim();
+    if (!clean) return;
+    onAddJabatan(clean);
+    onChange(clean);
+    setAddingNew(false);
+    setNewLabel("");
+  }
+
+  if (addingNew) {
+    return (
+      <div style={{ display: "flex", gap: 6 }}>
+        <input autoFocus value={newLabel} onChange={(e) => setNewLabel(e.target.value)} placeholder="Nama jabatan baru" style={{ ...inputStyle, flex: 1 }} onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); confirmAdd(); } }} />
+        <Btn type="button" onClick={confirmAdd} style={{ padding: "8px 12px", fontSize: 12.5 }}>Tambah</Btn>
+        <Btn type="button" variant="ghost" onClick={() => { setAddingNew(false); setNewLabel(""); }} style={{ padding: "8px 12px", fontSize: 12.5 }}>Batal</Btn>
+      </div>
+    );
+  }
+
+  return (
+    <select value={value} onChange={handleSelectChange} style={inputStyle}>
+      <option value="">— pilih jabatan —</option>
+      {jabatanOptions.map((j) => <option key={j} value={j}>{j}</option>)}
+      <option value="__new__">+ Tambah jabatan baru...</option>
+    </select>
+  );
+}
+
+function AddUserForm({ warga, pengguna, jabatanOptions, onAddJabatan, onCancel, onSubmit }) {
   const [nama, setNama] = useState("");
   const [hp, setHp] = useState("");
   const [role, setRole] = useState("warga");
+  const [jabatan, setJabatan] = useState("");
+  const [wargaId, setWargaId] = useState(warga[0]?.id || "");
+  const [kepemilikan, setKepemilikan] = useState("Pemilik");
+
+  const sudahAdaKontakUtama = pengguna.some((p) => p.wargaId === wargaId && p.reminderIPL);
+
+  function handleSubmit(e) {
+    e.preventDefault();
+    if (!nama || !hp) return;
+    const data = { nama, hp, role, jabatan: "" };
+    if (role === "pengurus") {
+      data.jabatan = jabatan || "";
+    } else if (role === "warga") {
+      data.wargaId = wargaId;
+      data.kepemilikan = kepemilikan;
+      data.reminderIPL = !sudahAdaKontakUtama;
+    }
+    onSubmit(data);
+  }
+
   return (
-    <FormShell title="Tambah Pengguna" onCancel={onCancel} onSubmit={(e) => { e.preventDefault(); if (!nama || !hp) return; onSubmit({ nama, hp, role }); }}>
+    <FormShell title="Tambah Warga" onCancel={onCancel} onSubmit={handleSubmit}>
       <div className="row-3" style={{ marginBottom: 16 }}>
         <Field label="Nama"><input value={nama} onChange={(e) => setNama(e.target.value)} style={inputStyle} /></Field>
         <Field label="No. HP"><input value={hp} onChange={(e) => setHp(e.target.value)} placeholder="0812xxxxxxx" style={inputStyle} /></Field>
-        <Field label="Peran">
+        <Field label="Status">
           <select value={role} onChange={(e) => setRole(e.target.value)} style={inputStyle}>
-            <option value="admin">Administrator</option><option value="pengurus">Pengurus</option><option value="security">Security</option><option value="warga">Warga</option>
+            <option value="pengurus">Pengurus</option><option value="security">Security</option><option value="warga">Warga</option>
           </select>
         </Field>
       </div>
-      <Btn type="submit">Simpan Pengguna</Btn>
+
+      {role === "pengurus" && (
+        <div style={{ marginBottom: 16 }}>
+          <Field label="Jabatan">
+            <JabatanSelectField value={jabatan} onChange={setJabatan} jabatanOptions={jabatanOptions} onAddJabatan={onAddJabatan} />
+          </Field>
+        </div>
+      )}
+
+      {role === "warga" && (
+        <div style={{ marginBottom: 16 }}>
+          <div className="row-3" style={{ marginBottom: 0 }}>
+            <Field label="Rumah">
+              <select value={wargaId} onChange={(e) => setWargaId(e.target.value)} style={inputStyle}>
+                {warga.map((w) => <option key={w.id} value={w.id}>{w.noRumah}</option>)}
+              </select>
+            </Field>
+            <Field label="Kepemilikan">
+              <select value={kepemilikan} onChange={(e) => setKepemilikan(e.target.value)} style={inputStyle}>
+                <option value="Pemilik">Pemilik</option>
+                <option value="Penyewa">Penyewa</option>
+              </select>
+            </Field>
+          </div>
+          <div style={{ fontSize: 12, color: COLORS.inkSoft, marginTop: 6 }}>
+            {sudahAdaKontakUtama
+              ? "Rumah ini sudah punya kontak utama IPL. Akun baru jadi penghuni tambahan — bisa dijadikan kontak utama kapan saja lewat tombol Edit."
+              : "Rumah ini belum punya kontak utama IPL — akun baru otomatis jadi kontak utama."}
+          </div>
+        </div>
+      )}
+
+      {role === "security" && (
+        <div style={{ fontSize: 12, color: COLORS.inkSoft, marginBottom: 16 }}>Akun security otomatis masuk ke kartu "Pos Security", tidak perlu pilih rumah.</div>
+      )}
+
+      <Btn type="submit">Simpan</Btn>
     </FormShell>
+  );
+}
+
+function EditWargaModal({ data: p, warga, pengguna, jabatanOptions, onAddJabatan, onCancel, onSubmit }) {
+  const [nama, setNama] = useState(p.nama);
+  const [hp, setHp] = useState(p.hp);
+  const [role, setRole] = useState(p.role);
+  const [jabatan, setJabatan] = useState(p.jabatan || "");
+  const [wargaId, setWargaId] = useState(p.wargaId || warga[0]?.id || "");
+  const [kepemilikan, setKepemilikan] = useState(p.kepemilikan || "Pemilik");
+  const [reminderIPL, setReminderIPL] = useState(!!p.reminderIPL);
+
+  const penghuniRumahBaru = pengguna.filter((x) => x.wargaId === wargaId && x.id !== p.id);
+  const rumahBaruSudahAdaKontakUtama = penghuniRumahBaru.some((x) => x.reminderIPL);
+  const pindahRumah = role === "warga" && wargaId !== p.wargaId;
+
+  function handleSubmit(e) {
+    e.preventDefault();
+    if (!nama || !hp) return;
+    const data = { nama, hp, role, jabatan: "" };
+    if (role === "pengurus") {
+      data.jabatan = jabatan || "";
+      data.wargaId = undefined;
+      data.kepemilikan = undefined;
+      data.reminderIPL = false;
+    } else if (role === "security") {
+      data.wargaId = undefined;
+      data.kepemilikan = undefined;
+      data.reminderIPL = false;
+    } else {
+      data.wargaId = wargaId;
+      data.kepemilikan = kepemilikan;
+      data.reminderIPL = reminderIPL;
+    }
+    onSubmit(data);
+  }
+
+  return (
+    <div style={{ position: "fixed", inset: 0, background: "rgba(29,29,31,0.5)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 80, padding: 16 }}>
+      <Card style={{ padding: 22, maxWidth: 420, width: "100%", maxHeight: "88vh", overflowY: "auto" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
+          <div style={{ fontWeight: 700, fontSize: 17 }}>Edit Warga</div>
+          <button onClick={onCancel} style={{ background: COLORS.bg, border: "none", borderRadius: 999, width: 30, height: 30, cursor: "pointer", color: COLORS.inkSoft, display: "flex", alignItems: "center", justifyContent: "center" }}><X size={16} /></button>
+        </div>
+        <form onSubmit={handleSubmit} style={{ display: "grid", gap: 14 }}>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+            <Field label="Nama"><input value={nama} onChange={(e) => setNama(e.target.value)} style={inputStyle} /></Field>
+            <Field label="No. HP"><input value={hp} onChange={(e) => setHp(e.target.value)} style={inputStyle} /></Field>
+          </div>
+
+          <Field label="Status">
+            <select value={role} onChange={(e) => setRole(e.target.value)} style={inputStyle}>
+              <option value="pengurus">Pengurus</option><option value="security">Security</option><option value="warga">Warga</option>
+            </select>
+          </Field>
+
+          {role === "pengurus" && (
+            <Field label="Jabatan">
+              <JabatanSelectField value={jabatan} onChange={setJabatan} jabatanOptions={jabatanOptions} onAddJabatan={onAddJabatan} />
+            </Field>
+          )}
+
+          {role === "warga" && (
+            <>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+                <Field label="Rumah">
+                  <select value={wargaId} onChange={(e) => setWargaId(e.target.value)} style={inputStyle}>
+                    {warga.map((w) => <option key={w.id} value={w.id}>{w.noRumah}</option>)}
+                  </select>
+                </Field>
+                <Field label="Kepemilikan">
+                  <select value={kepemilikan} onChange={(e) => setKepemilikan(e.target.value)} style={inputStyle}>
+                    <option value="Pemilik">Pemilik</option>
+                    <option value="Penyewa">Penyewa</option>
+                  </select>
+                </Field>
+              </div>
+              {pindahRumah && <div style={{ fontSize: 12, color: COLORS.warning, background: COLORS.warningSoft, padding: "8px 10px", borderRadius: 8 }}>Dipindah ke rumah lain — status kontak utama di rumah lama (kalau ada) akan lepas otomatis.</div>}
+              <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, cursor: "pointer" }}>
+                <input type="checkbox" checked={reminderIPL} onChange={(e) => setReminderIPL(e.target.checked)} style={{ width: 16, height: 16, accentColor: COLORS.accent }} />
+                Jadikan kontak utama IPL untuk rumah ini
+                {reminderIPL && rumahBaruSudahAdaKontakUtama && <span style={{ color: COLORS.warning, fontSize: 11.5 }}>(akan gantikan kontak utama lama)</span>}
+              </label>
+            </>
+          )}
+
+          <Btn type="submit">Simpan Perubahan</Btn>
+        </form>
+      </Card>
+    </div>
   );
 }
 
@@ -1832,7 +2341,6 @@ function LoginScreen({ pengguna, onLogin, demoPin }) {
             Prototype demo — belum ada backend sungguhan. Gunakan PIN <b>{demoPin}</b> untuk akun mana pun, atau login cepat sebagai:
           </div>
           <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 12 }}>
-            <Btn variant="ghost" style={{ fontSize: 12.5, padding: "7px 12px" }} onClick={() => quickLogin("admin")}>Administrator</Btn>
             <Btn variant="ghost" style={{ fontSize: 12.5, padding: "7px 12px" }} onClick={() => quickLogin("pengurus")}>Pengurus</Btn>
             <Btn variant="ghost" style={{ fontSize: 12.5, padding: "7px 12px" }} onClick={() => quickLogin("security")}>Security</Btn>
             <Btn variant="ghost" style={{ fontSize: 12.5, padding: "7px 12px" }} onClick={() => quickLogin("warga")}>Warga</Btn>
