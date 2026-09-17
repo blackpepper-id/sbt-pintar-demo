@@ -102,6 +102,14 @@ function monthsRangeAsc(n) {
     return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}`;
   });
 }
+// N bulan setelah bulan berjalan, urut menaik — dipakai untuk opsi "bayar
+// di muka" (warga mau lunasi beberapa bulan ke depan sekaligus)
+function monthsAheadAsc(n) {
+  return Array.from({ length: n }).map((_, idx) => {
+    const d = new Date(now.getFullYear(), now.getMonth() + 1 + idx, 1);
+    return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}`;
+  });
+}
 const recentMonths = [0, 1, 2].map((back) => {
   const d = new Date(now.getFullYear(), now.getMonth() - back, 1);
   return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}`;
@@ -119,13 +127,55 @@ function waLink(hp, text) {
 }
 
 // ============================================================
-// akses & peran
-// ============================================================
+// akses & peran — matriks hak akses per fitur/menu, dikelola pengurus
+// lewat Setting → Kelola User Akses. PERMISSIONS_RUNTIME diisi komponen
+// utama tiap kali state permissions berubah, supaya fungsi canX(role) di
+// bawah (dipakai di banyak tempat dengan signature lama) tetap baca
+// nilai TERBARU tanpa perlu refactor semua titik pemakaian.
 const roleLabel = { pengurus: "Pengurus", security: "Security", warga: "Warga" };
-const canVerifikasi = (role) => role === "pengurus";
-const canApprove = (role) => role === "pengurus";
-const canKelolaAkses = (role) => role === "pengurus";
-const canCatatKeuangan = (role) => role === "pengurus";
+// grup 1: aksi/fitur DI DALAM sebuah menu (bukan visibilitas menunya)
+const FEATURE_ACTIONS = [
+  { id: "catat_keuangan", label: "Catat Transaksi & Atur Pos Anggaran", menu: "Mutasi Transaksi" },
+  { id: "verifikasi_ipl", label: "Verifikasi Pembayaran IPL & THR", menu: "Tagihan IPL" },
+  { id: "approve_kegiatan", label: "Setujui Kegiatan / Notulensi", menu: "Kegiatan" },
+  { id: "kelola_darurat", label: "Kelola Kontak Darurat & Perangkat Desa", menu: "Kontak Darurat" },
+  { id: "kelola_warga", label: "Kelola Data Warga & Pengguna", menu: "Warga" },
+];
+// grup 2: visibilitas tab/menu itu sendiri — bisa diakses/dilihat atau tidak
+const SCREEN_ACCESS = [
+  { id: "screen_dashboard", tabId: "dashboard", label: "Ringkasan" },
+  { id: "screen_laporan", tabId: "laporan", label: "Mutasi Transaksi" },
+  { id: "screen_iuran", tabId: "iuran", label: "Tagihan IPL" },
+  { id: "screen_absensi", tabId: "absensi", label: "Absensi Security" },
+  { id: "screen_darurat", tabId: "darurat", label: "Kontak Darurat" },
+  { id: "screen_kegiatan", tabId: "kegiatan", label: "Kegiatan" },
+  { id: "screen_warga", tabId: "warga", label: "Warga" },
+  { id: "screen_setting", tabId: "setting", label: "Setting" },
+];
+const PERMISSION_FEATURES = [...FEATURE_ACTIONS, ...SCREEN_ACCESS];
+const PERMISSIONS_DEFAULT = PERMISSION_FEATURES.reduce((acc, f) => {
+  acc[f.id] = { pengurus: true, warga: false, security: false };
+  return acc;
+}, {});
+// default visibilitas menu — cocok dengan perilaku sebelumnya: 4 menu
+// keuangan+setting dibatasi, 4 menu operasional (absensi/darurat/kegiatan/
+// warga) terbuka untuk semua peran
+["screen_absensi", "screen_darurat", "screen_kegiatan", "screen_warga"].forEach((id) => {
+  PERMISSIONS_DEFAULT[id] = { pengurus: true, warga: true, security: true };
+});
+["screen_dashboard", "screen_laporan", "screen_iuran"].forEach((id) => {
+  PERMISSIONS_DEFAULT[id] = { pengurus: true, warga: true, security: false };
+});
+let PERMISSIONS_RUNTIME = PERMISSIONS_DEFAULT;
+function hasAccess(featureId, role) {
+  return !!PERMISSIONS_RUNTIME?.[featureId]?.[role];
+}
+const canVerifikasi = (role) => hasAccess("verifikasi_ipl", role);
+const canApprove = (role) => hasAccess("approve_kegiatan", role);
+const canKelolaAkses = (role) => hasAccess("screen_setting", role);
+const canCatatKeuangan = (role) => hasAccess("catat_keuangan", role);
+const canKelolaDarurat = (role) => hasAccess("kelola_darurat", role);
+const canKelolaWarga = (role) => hasAccess("kelola_warga", role);
 
 // ============================================================
 // Pos Anggaran — SATU sumber untuk kategori transaksi SEKALIGUS budget
@@ -191,12 +241,17 @@ function getKategoriOperasional(posAnggaran) {
 // dihasilkan sistem lewat verifikasi, tidak perlu input manual lagi)
 // Periode Iuran THR — sukarela, 1x/tahun, bergeser ikut kalender Lebaran.
 // Pengurus atur bulan & tahun-nya tiap tahun lewat menu Setting.
-const THR_CONFIG_DEFAULT = { tahun: "2026", bulan: "2026-03", aktif: true };
+const THR_CONFIG_DEFAULT = { tahun: "2026", bulan: "2026-03", aktif: true, minimal: 50000 };
 
 // ============================================================
 // seed data
 // ============================================================
-const SALDO_AWAL_KAS = 6800000;
+// Posisi awal sebelum SBT Pintar mulai dipakai (pencatatan manual tahun-
+// tahun sebelumnya) — TIDAK bisa dihitung dari data transaksi karena
+// riwayat sebelum tahun ini memang tidak ada di sistem. Pengurus isi
+// manual lewat Setting → Kelola Saldo & Tunggakan Awal Tahun; nilai di
+// sini cuma default awal sebelum diisi ulang.
+const OPENING_CONFIG_DEFAULT = { saldoAkhirTahunLalu: 6800000, tunggakanTahunLalu: 0, tunggakanUntukTahun: null };
 const IPL_PER_BULAN = 200000;
 const IPL_DISKON = 100000;
 const REKENING_IPL = { bank: "Bank BCA", nomor: "1234567890", atasNama: "Bendahara" };
@@ -523,7 +578,7 @@ const COLORS = {
 // ============================================================
 // storage
 // ============================================================
-const KEYS = { warga: "sbt:warga:v6", transaksi: "sbt:transaksi:v4", kegiatan: "sbt:kegiatan:v3", pengguna: "sbt:pengguna:v7", absensi: "sbt:absensi:v1", jabatanOptions: "sbt:jabatanoptions:v1", kontakDarurat: "sbt:kontakdarurat:v2", perangkatDesa: "sbt:perangkatdesa:v2", posAnggaran: "sbt:posanggaran:v1", thrConfig: "sbt:thrconfig:v1" };
+const KEYS = { warga: "sbt:warga:v6", transaksi: "sbt:transaksi:v4", kegiatan: "sbt:kegiatan:v3", pengguna: "sbt:pengguna:v7", absensi: "sbt:absensi:v1", jabatanOptions: "sbt:jabatanoptions:v1", kontakDarurat: "sbt:kontakdarurat:v2", perangkatDesa: "sbt:perangkatdesa:v2", posAnggaran: "sbt:posanggaran:v1", thrConfig: "sbt:thrconfig:v1", openingConfig: "sbt:openingconfig:v1", permissions: "sbt:permissions:v1" };
 async function loadKey(key, fallback) {
   try {
     if (typeof window !== "undefined" && window.storage) {
@@ -1033,6 +1088,9 @@ export default function SBTPintar() {
   const [perangkatDesa, setPerangkatDesa] = useState(seedPerangkatDesa);
   const [posAnggaran, setPosAnggaran] = useState(POS_ANGGARAN_DEFAULT);
   const [thrConfig, setThrConfig] = useState(THR_CONFIG_DEFAULT);
+  const [openingConfig, setOpeningConfig] = useState(OPENING_CONFIG_DEFAULT);
+  const [permissions, setPermissions] = useState(PERMISSIONS_DEFAULT);
+  PERMISSIONS_RUNTIME = permissions;
   const [showAddKontak, setShowAddKontak] = useState(false);
   const [editingKontak, setEditingKontak] = useState(null);
   const [showAddPerangkat, setShowAddPerangkat] = useState(false);
@@ -1043,8 +1101,12 @@ export default function SBTPintar() {
   const namaAktif = loggedInUser?.nama || "";
 
   useEffect(() => {
-    if (role === "security" && ["dashboard", "laporan", "iuran"].includes(tab)) {
-      setTab("kegiatan");
+    const screenIdByTab = { dashboard: "screen_dashboard", laporan: "screen_laporan", iuran: "screen_iuran", absensi: "screen_absensi", darurat: "screen_darurat", kegiatan: "screen_kegiatan", warga: "screen_warga", setting: "screen_setting" };
+    const screenId = screenIdByTab[tab];
+    if (screenId && role && !hasAccess(screenId, role)) {
+      const urutanFallback = ["dashboard", "laporan", "iuran", "kegiatan", "darurat", "absensi", "warga"];
+      const aman = urutanFallback.find((t) => hasAccess(screenIdByTab[t], role));
+      setTab(aman || "kegiatan");
     }
   }, [role, tab]);
   const [laporanBulan, setLaporanBulan] = useState(currentMonthKey);
@@ -1078,12 +1140,13 @@ export default function SBTPintar() {
     document.head.appendChild(link);
 
     (async () => {
-      const [w, t, k, p, abs, so, kd, pd, pa, tc] = await Promise.all([
+      const [w, t, k, p, abs, so, kd, pd, pa, tc, oc, pm] = await Promise.all([
         loadKey(KEYS.warga, null), loadKey(KEYS.transaksi, null),
         loadKey(KEYS.kegiatan, null), loadKey(KEYS.pengguna, null),
         loadKey(KEYS.absensi, null), loadKey(KEYS.jabatanOptions, null),
         loadKey(KEYS.kontakDarurat, null), loadKey(KEYS.perangkatDesa, null),
         loadKey(KEYS.posAnggaran, null), loadKey(KEYS.thrConfig, null),
+        loadKey(KEYS.openingConfig, null), loadKey(KEYS.permissions, null),
       ]);
       if (w) setWarga(w); else saveKey(KEYS.warga, seedWarga);
       if (t) setTransaksi(t); else saveKey(KEYS.transaksi, seedTransaksi);
@@ -1095,6 +1158,8 @@ export default function SBTPintar() {
       if (pd) setPerangkatDesa(pd); else saveKey(KEYS.perangkatDesa, seedPerangkatDesa);
       if (pa) setPosAnggaran(pa); else saveKey(KEYS.posAnggaran, POS_ANGGARAN_DEFAULT);
       if (tc) setThrConfig(tc); else saveKey(KEYS.thrConfig, THR_CONFIG_DEFAULT);
+      if (oc) setOpeningConfig(oc); else saveKey(KEYS.openingConfig, OPENING_CONFIG_DEFAULT);
+      if (pm) setPermissions(pm); else saveKey(KEYS.permissions, PERMISSIONS_DEFAULT);
       setLoading(false);
     })();
   }, []);
@@ -1246,6 +1311,18 @@ export default function SBTPintar() {
   }, []);
   const updateThrConfig = (data) => {
     setThrConfig((prev) => { const next = { ...prev, ...data }; saveKey(KEYS.thrConfig, next); return next; });
+  };
+  const updateOpeningConfig = (data) => {
+    setOpeningConfig((prev) => { const next = { ...prev, ...data }; saveKey(KEYS.openingConfig, next); return next; });
+    setToast("Saldo & tunggakan awal tahun diperbarui.");
+  };
+  const togglePermission = (featureId, roleKey) => {
+    if (featureId === "screen_setting" && roleKey === "pengurus") return; // jangan sampai pengurus terkunci dari Setting
+    setPermissions((prev) => {
+      const next = { ...prev, [featureId]: { ...prev[featureId], [roleKey]: !prev[featureId]?.[roleKey] } };
+      saveKey(KEYS.permissions, next);
+      return next;
+    });
   };
 
   const updateWargaLengkap = (id, data) => {
@@ -1439,12 +1516,12 @@ export default function SBTPintar() {
   };
 
   // ---- computed ----
-  const saldo = useMemo(() => SALDO_AWAL_KAS + transaksi.reduce((s, t) => s + (t.tipe === "masuk" ? t.jumlah : -t.jumlah), 0), [transaksi]);
+  const saldo = useMemo(() => openingConfig.saldoAkhirTahunLalu + transaksi.reduce((s, t) => s + (t.tipe === "masuk" ? t.jumlah : -t.jumlah), 0), [transaksi, openingConfig]);
   const saldoAkhirBulanLalu = useMemo(() => {
     const bulanLaluKey = months12Desc[1]; // [0] = bulan berjalan, [1] = bulan sebelumnya
     const totalSampaiBulanLalu = transaksi.filter((t) => monthKeyOf(t.tanggal) <= bulanLaluKey).reduce((s, t) => s + (t.tipe === "masuk" ? t.jumlah : -t.jumlah), 0);
-    return SALDO_AWAL_KAS + totalSampaiBulanLalu;
-  }, [transaksi]);
+    return openingConfig.saldoAkhirTahunLalu + totalSampaiBulanLalu;
+  }, [transaksi, openingConfig]);
   const bulanIniMasuk = useMemo(() => transaksi.filter((t) => t.tipe === "masuk" && monthKeyOf(t.tanggal) === currentMonthKey).reduce((s, t) => s + t.jumlah, 0), [transaksi]);
   const bulanIniKeluar = useMemo(() => transaksi.filter((t) => t.tipe === "keluar" && monthKeyOf(t.tanggal) === currentMonthKey).reduce((s, t) => s + t.jumlah, 0), [transaksi]);
   const belumBayarCount = useMemo(() => warga.filter((w) => {
@@ -1491,9 +1568,9 @@ export default function SBTPintar() {
       const totalSampaiBulanIni = transaksi
         .filter((t) => monthKeyOf(t.tanggal) <= mk)
         .reduce((s, t) => s + (t.tipe === "masuk" ? t.jumlah : -t.jumlah), 0);
-      return { bulan: mk, saldo: SALDO_AWAL_KAS + totalSampaiBulanIni };
+      return { bulan: mk, saldo: openingConfig.saldoAkhirTahunLalu + totalSampaiBulanIni };
     });
-  }, [transaksi]);
+  }, [transaksi, openingConfig]);
 
   // pemasukan vs pengeluaran per bulan, 12 bulan terakhir
   const masukKeluarBulanan = useMemo(() => {
@@ -1540,20 +1617,23 @@ export default function SBTPintar() {
   }, 0), 0), [warga, semuaBulanTahunIni]);
   const realisasiIPLTahunIni = useMemo(() => transaksi.filter((t) => t.tipe === "masuk" && t.kategori === "Pembayaran IPL" && t.tanggal.slice(0, 4) === String(tahunBerjalan)).reduce((s, t) => s + t.jumlah, 0), [transaksi, tahunBerjalan]);
 
-  // tunggakan tahun lalu — dalam batas data yang terlacak (12 bulan terakhir)
-  const bulanTahunLaluTerlacak = useMemo(() => months12Asc.filter((mk) => mk.startsWith(String(tahunLalu))), [tahunLalu]);
-  const targetTunggakanTahunLalu = useMemo(() => bulanTahunLaluTerlacak.reduce((sum, mk) => sum + warga.reduce((s, w) => {
-    const t = getTagihanBulan(w, mk);
-    return s + (t.status === "aktif" ? t.tarif : 0);
-  }, 0), 0), [warga, bulanTahunLaluTerlacak]);
+  // tunggakan & saldo akhir tahun lalu — TIDAK dihitung dari transaksi karena
+  // pencatatan di SBT Pintar baru mulai tahun ini; nilainya diisi manual oleh
+  // pengurus (dari pembukuan lama) lewat Setting → Kelola Saldo & Tunggakan
+  // Awal Tahun. Realisasi tetap dihitung otomatis kalau nanti ada pembayaran
+  // yang memang ditandai melunasi tunggakan lama tersebut.
+  const targetTunggakanTahunLalu = openingConfig.tunggakanTahunLalu;
   const realisasiTunggakanTahunLalu = useMemo(() => transaksi.filter((t) => t.tipe === "masuk" && t.kategori === "Pembayaran IPL" && t.monthKey && t.monthKey.startsWith(String(tahunLalu))).reduce((s, t) => s + t.jumlah, 0), [transaksi, tahunLalu]);
-
-  // saldo akhir tahun lalu (posisi kas per 31 Desember tahun lalu)
+  // saldo akhir tahun lalu = titik nol manual (openingConfig, diisi 1x di awal
+  // pakai SBT Pintar) + akumulasi seluruh transaksi sampai akhir tahun lalu —
+  // otomatis "menjalar" tiap tahun tanpa perlu diisi ulang manual. Di tahun
+  // pertama pakai app, tidak ada transaksi sebelum itu jadi hasilnya = persis
+  // angka manual; mulai tahun kedua otomatis ketambah transaksi tahun sebelumnya.
   const saldoAkhirTahunLalu = useMemo(() => {
-    const akhir = `${tahunLalu}-12`;
-    const total = transaksi.filter((t) => monthKeyOf(t.tanggal) <= akhir).reduce((s, t) => s + (t.tipe === "masuk" ? t.jumlah : -t.jumlah), 0);
-    return SALDO_AWAL_KAS + total;
-  }, [transaksi, tahunLalu]);
+    const akhirTahunLalu = `${tahunLalu}-12`;
+    const totalSampaiAkhirTahunLalu = transaksi.filter((t) => monthKeyOf(t.tanggal) <= akhirTahunLalu).reduce((s, t) => s + (t.tipe === "masuk" ? t.jumlah : -t.jumlah), 0);
+    return openingConfig.saldoAkhirTahunLalu + totalSampaiAkhirTahunLalu;
+  }, [transaksi, tahunLalu, openingConfig]);
   const totalTargetPemasukan = targetIPLTahunan + targetTunggakanTahunLalu;
   const totalRealisasiPemasukan = realisasiIPLTahunIni + realisasiTunggakanTahunLalu;
 
@@ -1596,16 +1676,27 @@ export default function SBTPintar() {
   }, [warga, gridFilter]);
   const jumlahMenunggak = warga.filter((w) => arrearsStreak(w) > 0).length;
   const jumlahMenunggu = warga.filter((w) => w.statusBayar[currentMonthKey]?.status === "menunggu").length;
+  // pembayaran di muka (bulan yang belum masuk kolom grid 12-bulan) yang
+  // menunggu verifikasi — supaya tidak "hilang" dari pantauan pengurus
+  const pembayaranDiMukaMenunggu = useMemo(() => {
+    const hasil = [];
+    warga.forEach((w) => {
+      Object.entries(w.statusBayar).forEach(([mk, entry]) => {
+        if (entry.status === "menunggu" && !months12Desc.includes(mk)) hasil.push({ warga: w, monthKey: mk });
+      });
+    });
+    return hasil.sort((a, b) => a.monthKey.localeCompare(b.monthKey));
+  }, [warga]);
 
   const tabs = [
-    ...(role !== "security" ? [{ id: "dashboard", label: "Ringkasan", icon: LayoutDashboard }] : []),
-    ...(role !== "security" ? [{ id: "laporan", label: "Mutasi Transaksi", icon: FileText }] : []),
-    ...(role !== "security" ? [{ id: "iuran", label: "Iuran IPL", icon: Wallet }] : []),
-    { id: "kegiatan", label: "Kegiatan", icon: CalendarDays },
-    { id: "darurat", label: "Kontak Darurat", icon: Siren },
-    { id: "absensi", label: "Absensi Security", icon: ClipboardCheck },
-    { id: "warga", label: "Warga", icon: UserCog },
-    ...(canKelolaAkses(role) ? [{ id: "setting", label: "Setting", icon: Settings }] : []),
+    ...(hasAccess("screen_dashboard", role) ? [{ id: "dashboard", label: "Ringkasan", icon: LayoutDashboard }] : []),
+    ...(hasAccess("screen_laporan", role) ? [{ id: "laporan", label: "Mutasi Transaksi", icon: FileText }] : []),
+    ...(hasAccess("screen_iuran", role) ? [{ id: "iuran", label: "Tagihan IPL", icon: Wallet }] : []),
+    ...(hasAccess("screen_absensi", role) ? [{ id: "absensi", label: "Absensi Security", icon: ClipboardCheck }] : []),
+    ...(hasAccess("screen_darurat", role) ? [{ id: "darurat", label: "Kontak Darurat", icon: Siren }] : []),
+    ...(hasAccess("screen_kegiatan", role) ? [{ id: "kegiatan", label: "Kegiatan", icon: CalendarDays }] : []),
+    ...(hasAccess("screen_warga", role) ? [{ id: "warga", label: "Warga", icon: UserCog }] : []),
+    ...(hasAccess("screen_setting", role) ? [{ id: "setting", label: "Setting", icon: Settings }] : []),
   ];
 
   if (loading) {
@@ -1694,11 +1785,11 @@ export default function SBTPintar() {
         </nav>
 
         {/* bottom nav (mobile) */}
-        <nav className="bottomnav no-print" style={{ display: "none", position: "fixed", bottom: 0, left: 0, right: 0, background: COLORS.card, borderTop: `1px solid ${COLORS.divider}`, padding: "8px 4px", overflowX: "auto", WebkitOverflowScrolling: "touch", zIndex: 40, WebkitTransform: "translateZ(0)", transform: "translateZ(0)" }}>
+        <nav className="bottomnav no-print" style={{ display: "none", position: "fixed", bottom: 0, left: 0, right: 0, background: COLORS.card, borderTop: `1px solid ${COLORS.divider}`, padding: "8px 4px", justifyContent: tabs.length <= 5 ? "space-around" : "flex-start", overflowX: "auto", WebkitOverflowScrolling: "touch", zIndex: 40, WebkitTransform: "translateZ(0)", transform: "translateZ(0)" }}>
           {tabs.map((t) => {
             const Icon = t.icon; const active = tab === t.id;
             return (
-              <button key={t.id} onClick={() => setTab(t.id)} style={{ background: "none", border: "none", display: "flex", flexDirection: "column", alignItems: "center", gap: 4, color: active ? COLORS.accent : COLORS.inkFaint, fontSize: 11, fontWeight: 600, cursor: "pointer", flexShrink: 0, minWidth: 68, padding: "2px 4px", whiteSpace: "nowrap" }}>
+              <button key={t.id} onClick={() => setTab(t.id)} style={{ background: "none", border: "none", display: "flex", flexDirection: "column", alignItems: "center", gap: 4, color: active ? COLORS.accent : COLORS.inkFaint, fontSize: 11, fontWeight: 600, cursor: "pointer", flexShrink: tabs.length <= 5 ? 1 : 0, flexGrow: tabs.length <= 5 ? 1 : 0, minWidth: tabs.length <= 5 ? 0 : 68, padding: "2px 4px", whiteSpace: "nowrap" }}>
                 <Icon size={22} strokeWidth={2.2} /> {t.label}
               </button>
             );
@@ -1761,7 +1852,7 @@ export default function SBTPintar() {
                 </div>
                 <div style={{ padding: 18, display: "flex", flexDirection: "column", gap: 18 }}>
                   <PemasukanBreakdownItem
-                    label="Iuran IPL Warga"
+                    label="Tagihan IPL Warga"
                     value={realisasiIPLTahunIni}
                     target={targetIPLTahunan}
                     color={COLORS.accent}
@@ -1772,14 +1863,14 @@ export default function SBTPintar() {
                     value={realisasiTunggakanTahunLalu}
                     target={targetTunggakanTahunLalu > 0 ? targetTunggakanTahunLalu : null}
                     color={COLORS.warning}
-                    note={`dari tunggakan ${tahunLalu} yang terlacak`}
+                    note={`dari tunggakan ${tahunLalu} (diisi manual di Setting)`}
                   />
                   <PemasukanBreakdownItem
                     label={`Saldo Akhir ${tahunLalu}`}
                     value={saldoAkhirTahunLalu}
                     target={null}
                     color={COLORS.sageDeep}
-                    note="posisi kas per 31 Desember tahun lalu"
+                    note="posisi kas per 31 Desember tahun lalu — otomatis"
                   />
                 </div>
               </Card>
@@ -1812,7 +1903,7 @@ export default function SBTPintar() {
 
           {tab === "iuran" && role !== "warga" && (
             <>
-              <SectionTitle title="Iuran IPL Semua Warga" subtitle="12 bulan terakhir" action={
+              <SectionTitle title="Tagihan IPL Semua Warga" subtitle="12 bulan terakhir" action={
                 <SegmentedControl
                   value={gridFilter}
                   onChange={setGridFilter}
@@ -1823,6 +1914,26 @@ export default function SBTPintar() {
                   ]}
                 />
               } />
+
+              {pembayaranDiMukaMenunggu.length > 0 && (
+                <Card style={{ padding: 16, marginBottom: 16, border: `1px dashed ${COLORS.warning}` }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 8, fontWeight: 700, fontSize: 13.5, marginBottom: 10 }}>
+                    <Clock size={15} color={COLORS.warning} /> Bayar di Muka Menunggu Verifikasi
+                  </div>
+                  <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                    {pembayaranDiMukaMenunggu.map(({ warga: w, monthKey: mk }) => {
+                      const kontakUtama = getKontakUtama(w.id, pengguna);
+                      return (
+                        <button key={`${w.id}-${mk}`} onClick={() => setCellModal({ warga: w, monthKey: mk, kontakUtama })} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", width: "100%", padding: "9px 12px", borderRadius: 9, background: COLORS.warningSoft, border: "none", cursor: "pointer", textAlign: "left" }}>
+                          <span style={{ fontSize: 13, fontWeight: 600 }}>{kontakUtama ? kontakUtama.nama : w.noRumah} <span style={{ fontWeight: 400, color: COLORS.inkSoft }}>· {w.noRumah}</span></span>
+                          <span className="mono" style={{ fontSize: 12.5, color: COLORS.warning, fontWeight: 700 }}>{monthLabel(mk)}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </Card>
+              )}
+
               <Card style={{ overflow: "hidden" }}>
                 <div className="grid-scroll" style={{ overflowX: "auto" }}>
                   <table style={{ minWidth: 720 }}>
@@ -2117,7 +2228,7 @@ export default function SBTPintar() {
                     <PerangkatDesaRow key={p.id} p={{ ...p, jabatan: p.jabatan || "Pengurus" }} canEdit={false} />
                   ))}
                 </div>
-                {canKelolaAkses(role) && (
+                {canKelolaDarurat(role) && (
                   <div style={{ padding: "0 18px 16px", fontSize: 11.5, color: COLORS.inkFaint }}>
                     Untuk tambah/ubah pengurus, kelola lewat menu <b>Warga</b> — datanya otomatis muncul di sini.
                   </div>
@@ -2131,7 +2242,7 @@ export default function SBTPintar() {
                     <PerangkatDesaRow key={p.id} p={{ ...p, jabatan: p.jabatan || "Security" }} canEdit={false} />
                   ))}
                 </div>
-                {canKelolaAkses(role) && (
+                {canKelolaDarurat(role) && (
                   <div style={{ padding: "0 18px 16px", fontSize: 11.5, color: COLORS.inkFaint }}>
                     Untuk tambah/ubah security, kelola lewat menu <b>Warga</b> — datanya otomatis muncul di sini.
                   </div>
@@ -2142,11 +2253,11 @@ export default function SBTPintar() {
                 <div style={{ padding: "16px 20px", borderBottom: `1px solid ${COLORS.divider}`, fontWeight: 700, fontSize: 14, textTransform: "uppercase", letterSpacing: "0.03em", color: COLORS.ink }}>Perangkat Desa &amp; Keamanan Wilayah</div>
                 <div style={{ padding: "6px 18px 18px" }}>
                   {perangkatDesa.map((p) => (
-                    <PerangkatDesaRow key={p.id} p={p} canEdit={canKelolaAkses(role)} onEdit={setEditingPerangkat} onDelete={deletePerangkatDesa} />
+                    <PerangkatDesaRow key={p.id} p={p} canEdit={canKelolaDarurat(role)} onEdit={setEditingPerangkat} onDelete={deletePerangkatDesa} />
                   ))}
                   {perangkatDesa.length === 0 && <EmptyRow text="Belum ada data." />}
                 </div>
-                {canKelolaAkses(role) && (
+                {canKelolaDarurat(role) && (
                   showAddPerangkat ? (
                     <div style={{ padding: "0 18px 18px" }}><PerangkatDesaFormFields onCancel={() => setShowAddPerangkat(false)} onSubmit={addPerangkatDesa} /></div>
                   ) : (
@@ -2161,11 +2272,11 @@ export default function SBTPintar() {
                 <div style={{ padding: "16px 20px", borderBottom: `1px solid ${COLORS.divider}`, fontWeight: 700, fontSize: 14, textTransform: "uppercase", letterSpacing: "0.03em", color: COLORS.ink }}>Hotline Darurat Kota Bogor</div>
                 <div style={{ padding: "6px 18px 18px" }}>
                   {kontakDarurat.map((k) => (
-                    <KontakDaruratRow key={k.id} k={k} canEdit={canKelolaAkses(role)} onEdit={setEditingKontak} onDelete={deleteKontakDarurat} />
+                    <KontakDaruratRow key={k.id} k={k} canEdit={canKelolaDarurat(role)} onEdit={setEditingKontak} onDelete={deleteKontakDarurat} />
                   ))}
                   {kontakDarurat.length === 0 && <EmptyRow text="Belum ada kontak darurat." />}
                 </div>
-                {canKelolaAkses(role) && (
+                {canKelolaDarurat(role) && (
                   showAddKontak ? (
                     <div style={{ padding: "0 18px 18px" }}><KontakDaruratFormFields onCancel={() => setShowAddKontak(false)} onSubmit={addKontakDarurat} /></div>
                   ) : (
@@ -2202,7 +2313,7 @@ export default function SBTPintar() {
             <>
               <SectionTitle title="Daftar Warga" />
 
-              {canKelolaAkses(role) && (
+              {canKelolaWarga(role) && (
                 <Card style={{ padding: 16, marginBottom: 18, fontSize: 12.5, color: COLORS.inkSoft }}>
                   <b>Status</b> menentukan akses fitur sekaligus posisi di data penduduk: <b>Pengurus</b> (akses penuh: verifikasi IPL, persetujuan konten, kelola warga), <b>Security</b> (akses urusan darurat & absensi jaga saja), <b>Warga</b> (akses dasar warga biasa).
                   <br /><br />
@@ -2210,7 +2321,7 @@ export default function SBTPintar() {
                 </Card>
               )}
 
-              {canKelolaAkses(role) && showAddUser && (
+              {canKelolaWarga(role) && showAddUser && (
                 <div style={{ position: "fixed", inset: 0, background: "rgba(29,29,31,0.5)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 80, padding: 16 }}>
                   <div style={{ width: "100%", maxWidth: 420, maxHeight: "88vh", overflowY: "auto" }}>
                     <AddUserForm
@@ -2226,13 +2337,13 @@ export default function SBTPintar() {
                 </div>
               )}
 
-              <div style={{ display: "flex", flexDirection: "column", gap: 14, paddingBottom: canKelolaAkses(role) ? 90 : 0 }}>
+              <div style={{ display: "flex", flexDirection: "column", gap: 14, paddingBottom: canKelolaWarga(role) ? 90 : 0 }}>
                 {warga.map((w) => (
                   <RumahCard
                     key={w.id}
                     rumah={w}
                     penghuni={getPenghuniRumah(w.id, pengguna)}
-                    canEdit={canKelolaAkses(role)}
+                    canEdit={canKelolaWarga(role)}
                     onEdit={setEditingWarga}
                     onDelete={deletePengguna}
                     onKelolaIPL={setKelolaIPLRumah}
@@ -2241,7 +2352,7 @@ export default function SBTPintar() {
 
                 <PosSecurityCard
                   security={pengguna.filter((p) => p.role === "security")}
-                  canEdit={canKelolaAkses(role)}
+                  canEdit={canKelolaWarga(role)}
                   onEdit={setEditingWarga}
                   onDelete={deletePengguna}
                 />
@@ -2268,7 +2379,7 @@ export default function SBTPintar() {
                 />
               )}
 
-              {canKelolaAkses(role) && (
+              {canKelolaWarga(role) && (
                 <div className="fab-btn">
                   <Btn pill onClick={() => { setAddUserDefaultRole("warga"); setShowAddUser(true); }} style={{ boxShadow: "0 10px 24px rgba(228,113,30,0.35)", fontSize: 15, padding: "13px 22px" }}>
                     <Plus size={16} /> Tambah Warga
@@ -2308,6 +2419,18 @@ export default function SBTPintar() {
               <div style={{ marginTop: 18 }}>
                 <CollapsibleCard title="Kelola Periode THR" subtitle="Atur bulan & tahun iuran THR tahun berjalan (sukarela)" defaultOpen={false}>
                   <ThrConfigManager thrConfig={thrConfig} onUpdate={updateThrConfig} />
+                </CollapsibleCard>
+              </div>
+
+              <div style={{ marginTop: 18 }}>
+                <CollapsibleCard title="Kelola Saldo & Tunggakan Awal Tahun" subtitle="Posisi awal dari pembukuan sebelum SBT Pintar dipakai — diisi manual" defaultOpen={false}>
+                  <OpeningConfigManager openingConfig={openingConfig} onUpdate={updateOpeningConfig} tahunLalu={tahunBerjalan - 1} />
+                </CollapsibleCard>
+              </div>
+
+              <div style={{ marginTop: 18 }}>
+                <CollapsibleCard title="Kelola User Akses" subtitle="Centang/hilangkan hak akses tiap peran per fitur — berlaku langsung" defaultOpen={false}>
+                  <PermissionMatrixManager permissions={permissions} onToggle={togglePermission} />
                 </CollapsibleCard>
               </div>
             </>
@@ -2368,7 +2491,7 @@ function WargaIuranView({ myWarga, onOpenPay, onOpenPayThr, thrConfig }) {
   if (!myWarga) {
     return (
       <>
-        <SectionTitle title="Iuran IPL Saya" />
+        <SectionTitle title="Tagihan IPL Saya" />
         <Card style={{ padding: 24, textAlign: "center", color: COLORS.inkSoft }}>Data warga untuk akun ini belum terhubung. Hubungi Pengurus.</Card>
       </>
     );
@@ -2381,12 +2504,17 @@ function WargaIuranView({ myWarga, onOpenPay, onOpenPayThr, thrConfig }) {
   }
   const belumCount = rows.filter((r) => r.type === "ipl" && r.tagihan.status === "aktif" && r.status === "belum").length;
   const totalTunggakan = rows.filter((r) => r.type === "ipl" && r.tagihan.status === "aktif" && r.status === "belum").reduce((s, r) => s + r.tagihan.tarif, 0);
-  const thrBelum = thrConfig.aktif && (!thrEntry || thrEntry.status === "belum");
+  // tombol "Ikut Iuran THR" cuma relevan selama bulan periode THR belum
+  // lewat — begitu bulan berjalan sudah lebih baru dari bulan THR yang
+  // diset, tombolnya hilang (baris riwayat tetap tampil, cuma CTA-nya saja
+  // yang tidak muncul lagi karena memang sudah tidak actionable)
+  const periodeThrMasihBerjalan = thrConfig.aktif && currentMonthKey <= thrConfig.bulan;
+  const thrBelum = periodeThrMasihBerjalan && (!thrEntry || thrEntry.status === "belum");
   const tagihanBulanIni = getTagihanBulan(myWarga, currentMonthKey);
 
   return (
     <>
-      <SectionTitle title="Iuran IPL Saya" subtitle={tagihanBulanIni.status === "aktif" ? `${myWarga.noRumah} · ${formatRp(tagihanBulanIni.tarif)}/bulan${tagihanBulanIni.tarif < IPL_PER_BULAN ? " (diskon)" : ""}` : `${myWarga.noRumah} · Tidak aktif bulan ini`} />
+      <SectionTitle title="Tagihan IPL Saya" subtitle={tagihanBulanIni.status === "aktif" ? `${myWarga.noRumah} · ${formatRp(tagihanBulanIni.tarif)}/bulan${tagihanBulanIni.tarif < IPL_PER_BULAN ? " (diskon)" : ""}` : `${myWarga.noRumah} · Tidak aktif bulan ini`} />
       <Card style={{ padding: 20, marginBottom: 18, display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 10 }}>
         <div>
           <div style={{ fontSize: 12.5, color: COLORS.inkSoft, fontWeight: 600 }}>{belumCount === 0 ? "Status Pembayaran" : "Total Tunggakan"}</div>
@@ -2407,7 +2535,7 @@ function WargaIuranView({ myWarga, onOpenPay, onOpenPayThr, thrConfig }) {
                   Iuran THR {r.tahun}
                   <span style={{ fontSize: 10, fontWeight: 700, color: COLORS.sageDeep, background: "#fff", padding: "2px 6px", borderRadius: 999 }}>SUKARELA</span>
                 </div>
-                <div className="mono" style={{ fontSize: 12.5, color: COLORS.inkSoft, marginTop: 2 }}>{r.jumlah > 0 ? formatRp(r.jumlah) : "Nominal bebas, sesuai kemampuan"}</div>
+                <div className="mono" style={{ fontSize: 12.5, color: COLORS.inkSoft, marginTop: 2 }}>{r.jumlah > 0 ? formatRp(r.jumlah) : `Nominal minimum ${formatRp(thrConfig.minimal || 0)}`}</div>
               </div>
               <StatusBadge status={r.status} />
             </div>
@@ -2431,21 +2559,104 @@ function WargaIuranView({ myWarga, onOpenPay, onOpenPayThr, thrConfig }) {
         </div>
       </Card>
 
-      {(belumCount > 0 || thrBelum) && (
-        <div className="fab-btn" style={{ display: "flex", flexDirection: "column", gap: 10, alignItems: "flex-end" }}>
-          {thrBelum && (
-            <Btn pill onClick={onOpenPayThr} variant="success" style={{ boxShadow: "0 10px 24px rgba(58,140,90,0.35)", fontSize: 14, padding: "12px 20px" }}>
-              <Wallet size={15} /> Ikut Iuran THR
-            </Btn>
-          )}
-          {belumCount > 0 && (
-            <Btn pill onClick={onOpenPay} style={{ boxShadow: "0 10px 24px rgba(0,113,227,0.35)", fontSize: 15, padding: "13px 22px" }}>
-              <Wallet size={16} /> Bayar IPL
-            </Btn>
-          )}
-        </div>
-      )}
+      <div className="fab-btn" style={{ display: "flex", flexDirection: "column", gap: 10, alignItems: "flex-end" }}>
+        {thrBelum && (
+          <Btn pill onClick={onOpenPayThr} variant="success" style={{ boxShadow: "0 10px 24px rgba(58,140,90,0.35)", fontSize: 15, padding: "13px 22px" }}>
+            <Wallet size={16} /> Ikut Iuran THR
+          </Btn>
+        )}
+        <Btn pill onClick={onOpenPay} style={{ boxShadow: "0 10px 24px rgba(0,113,227,0.35)", fontSize: 15, padding: "13px 22px" }}>
+          <Wallet size={16} /> Bayar IPL
+        </Btn>
+      </div>
     </>
+  );
+}
+
+function PermissionRow({ label, sublabel, featureId, permissions, onToggle, lockPengurus }) {
+  return (
+    <div style={{ padding: "10px 0", borderBottom: `1px solid ${COLORS.divider}` }}>
+      <div style={{ fontWeight: 600, fontSize: 13 }}>{label}</div>
+      {sublabel && <div style={{ fontSize: 11, color: COLORS.inkFaint, marginTop: 1, marginBottom: 6 }}>{sublabel}</div>}
+      <div style={{ display: "flex", gap: 16, flexWrap: "wrap", marginTop: sublabel ? 0 : 6 }}>
+        {["pengurus", "warga", "security"].map((k) => {
+          const isLocked = lockPengurus && k === "pengurus";
+          return (
+            <label key={k} style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12.5, cursor: isLocked ? "not-allowed" : "pointer", opacity: isLocked ? 0.6 : 1 }}>
+              <input
+                type="checkbox"
+                checked={isLocked ? true : !!permissions[featureId]?.[k]}
+                disabled={isLocked}
+                onChange={() => onToggle(featureId, k)}
+                title={isLocked ? "Akses Setting untuk Pengurus tidak bisa dicabut, supaya tidak terkunci." : undefined}
+                style={{ width: 16, height: 16, accentColor: COLORS.accent, cursor: isLocked ? "not-allowed" : "pointer", flexShrink: 0 }}
+              />
+              {roleLabel[k]}
+            </label>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function PermissionMatrixManager({ permissions, onToggle }) {
+  return (
+    <div>
+      <div style={{ fontSize: 11.5, color: COLORS.inkFaint, marginBottom: 14 }}>
+        Centang untuk kasih akses, hilangkan centang untuk cabut. Perubahan langsung berlaku ke semua akun dengan peran itu.
+      </div>
+
+      <div style={{ fontSize: 11, fontWeight: 700, color: COLORS.accent, textTransform: "uppercase", letterSpacing: "0.04em", marginBottom: 2 }}>Akses Fitur</div>
+      <div style={{ fontSize: 11, color: COLORS.inkFaint, marginBottom: 8 }}>Aksi di dalam menu yang memang sudah bisa diakses</div>
+      <div>
+        {FEATURE_ACTIONS.map((f) => (
+          <PermissionRow key={f.id} label={f.label} sublabel={f.menu} featureId={f.id} permissions={permissions} onToggle={onToggle} />
+        ))}
+      </div>
+
+      <div style={{ fontSize: 11, fontWeight: 700, color: COLORS.accent, textTransform: "uppercase", letterSpacing: "0.04em", marginTop: 20, marginBottom: 8 }}>Akses Menu / Tab</div>
+      <div>
+        {SCREEN_ACCESS.map((f) => (
+          <PermissionRow key={f.id} label={f.label} featureId={f.id} permissions={permissions} onToggle={onToggle} lockPengurus={f.id === "screen_setting"} />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function OpeningConfigManager({ openingConfig, onUpdate, tahunLalu }) {
+  const [saldo, setSaldo] = useState(String(openingConfig.saldoAkhirTahunLalu));
+  const [tunggakan, setTunggakan] = useState(String(openingConfig.tunggakanTahunLalu));
+  const tunggakanPerluUpdate = openingConfig.tunggakanUntukTahun !== tahunLalu;
+
+  function simpan() {
+    onUpdate({ saldoAkhirTahunLalu: Number(saldo) || 0, tunggakanTahunLalu: Number(tunggakan) || 0, tunggakanUntukTahun: tahunLalu });
+  }
+
+  return (
+    <div style={{ display: "grid", gap: 16 }}>
+      <div>
+        <div style={{ fontSize: 11.5, color: COLORS.inkFaint, marginBottom: 6 }}>Titik nol sebelum SBT Pintar dipakai — cukup diisi <b>1 kali saja</b>. Setelah itu saldo tahun-tahun berikutnya otomatis kehitung sendiri dari transaksi, tidak perlu diisi ulang.</div>
+        <Field label={`Saldo Akhir ${tahunLalu} (Rp)`}>
+          <input type="number" value={saldo} onChange={(e) => setSaldo(e.target.value)} style={inputStyle} />
+        </Field>
+      </div>
+
+      <div style={{ borderTop: `1px dashed ${COLORS.divider}`, paddingTop: 14 }}>
+        {tunggakanPerluUpdate && (
+          <div style={{ display: "flex", alignItems: "center", gap: 6, background: COLORS.warningSoft, color: COLORS.warning, borderRadius: 8, padding: "8px 10px", fontSize: 11.5, fontWeight: 600, marginBottom: 8 }}>
+            <AlertTriangle size={13} /> Perlu dicek & diperbarui untuk tahun {tahunLalu}
+          </div>
+        )}
+        <div style={{ fontSize: 11.5, color: COLORS.inkFaint, marginBottom: 6 }}>Beda dengan saldo — tunggakan <b>tidak otomatis</b> karena status "belum bayar" bisa berubah kapan saja. Cek angka Total Tunggakan di Ringkasan, lalu ketik ulang di sini <b>tiap awal tahun</b>.</div>
+        <Field label={`Total Tunggakan ${tahunLalu} (Rp)`}>
+          <input type="number" value={tunggakan} onChange={(e) => setTunggakan(e.target.value)} style={inputStyle} />
+        </Field>
+      </div>
+
+      <Btn onClick={simpan} style={{ width: "fit-content" }}>Simpan</Btn>
+    </div>
   );
 }
 
@@ -2453,9 +2664,10 @@ function ThrConfigManager({ thrConfig, onUpdate }) {
   const [tahun, setTahun] = useState(thrConfig.tahun);
   const [bulan, setBulan] = useState(thrConfig.bulan);
   const [aktif, setAktif] = useState(thrConfig.aktif);
+  const [minimal, setMinimal] = useState(String(thrConfig.minimal ?? 50000));
 
   function simpan() {
-    onUpdate({ tahun, bulan, aktif });
+    onUpdate({ tahun, bulan, aktif, minimal: Number(minimal) || 0 });
   }
 
   return (
@@ -2468,7 +2680,8 @@ function ThrConfigManager({ thrConfig, onUpdate }) {
         <Field label="Tahun"><input value={tahun} onChange={(e) => setTahun(e.target.value)} placeholder="2026" style={inputStyle} /></Field>
         <Field label="Bulan THR"><input type="month" value={bulan} onChange={(e) => setBulan(e.target.value)} style={inputStyle} /></Field>
       </div>
-      <div style={{ fontSize: 11.5, color: COLORS.inkFaint }}>Bulan ini yang menentukan posisi "Iuran THR" muncul di riwayat tagihan warga & daftar verifikasi pengurus. Ganti tiap tahun mengikuti kalender Lebaran.</div>
+      <Field label="Nominal Minimum (Rp)"><input type="number" value={minimal} onChange={(e) => setMinimal(e.target.value)} placeholder="50000" style={inputStyle} /></Field>
+      <div style={{ fontSize: 11.5, color: COLORS.inkFaint }}>Bulan menentukan posisi "Iuran THR" muncul di riwayat tagihan warga & daftar verifikasi pengurus. Nominal minimum cuma acuan bawah — warga tetap boleh isi lebih. Ganti tiap tahun mengikuti kalender Lebaran & kesepakatan pengurus.</div>
       <Btn onClick={simpan} style={{ width: "fit-content" }}>Simpan Periode THR</Btn>
     </div>
   );
@@ -2480,7 +2693,7 @@ function PayThrModal({ myWarga, thrConfig, onCancel, onSubmit }) {
 
   function handleSubmit(e) {
     e.preventDefault();
-    if (!jumlah || Number(jumlah) <= 0) return;
+    if (!jumlah || Number(jumlah) < (thrConfig.minimal || 0)) return;
     onSubmit(Number(jumlah), preview);
   }
 
@@ -2491,9 +2704,14 @@ function PayThrModal({ myWarga, thrConfig, onCancel, onSubmit }) {
         <div style={{ fontWeight: 700, fontSize: 17 }}>Ikut Iuran THR {thrConfig.tahun}</div>
         <button onClick={onCancel} style={{ background: COLORS.bg, border: "none", borderRadius: 999, width: 30, height: 30, cursor: "pointer", color: COLORS.inkSoft, display: "flex", alignItems: "center", justifyContent: "center" }}><X size={16} /></button>
       </div>
-      <div style={{ fontSize: 12.5, color: COLORS.inkSoft, marginBottom: 16 }}>Sifatnya sukarela — isi sesuai kemampuan, tidak ada nominal wajib.</div>
+      <div style={{ fontSize: 12.5, color: COLORS.inkSoft, marginBottom: 16 }}>Sifatnya sukarela — minimum {formatRp(thrConfig.minimal || 0)}, boleh lebih sesuai kemampuan.</div>
       <form onSubmit={handleSubmit} style={{ display: "grid", gap: 14 }}>
-        <Field label="Nominal (Rp)"><input type="number" value={jumlah} onChange={(e) => setJumlah(e.target.value)} placeholder="mis. 50000" style={inputStyle} autoFocus /></Field>
+        <Field label="Nominal (Rp)">
+          <input type="number" value={jumlah} onChange={(e) => setJumlah(e.target.value)} placeholder={`min. ${thrConfig.minimal || 0}`} style={inputStyle} autoFocus />
+        </Field>
+        {jumlah && Number(jumlah) < (thrConfig.minimal || 0) && (
+          <div style={{ fontSize: 11.5, color: COLORS.danger }}>Minimum {formatRp(thrConfig.minimal || 0)} ya.</div>
+        )}
         <Field label="Bukti Transfer (opsional)">
           <label style={{ display: "flex", alignItems: "center", gap: 8, padding: "10px 12px", border: `1px dashed ${COLORS.divider}`, borderRadius: 10, cursor: "pointer", fontSize: 12.5, color: COLORS.inkSoft }}>
             <Upload size={15} />
@@ -2506,7 +2724,7 @@ function PayThrModal({ myWarga, thrConfig, onCancel, onSubmit }) {
             }} />
           </label>
         </Field>
-        <Btn type="submit" variant="success">Kirim Konfirmasi</Btn>
+        <Btn type="submit" variant="success" disabled={!jumlah || Number(jumlah) < (thrConfig.minimal || 0)}>Kirim Konfirmasi</Btn>
       </form>
       </Card>
     </div>
@@ -2518,10 +2736,19 @@ function PayIPLModal({ myWarga, onCancel, onSubmit }) {
   // wajib dilunasi berurutan dari tunggakan tertua (tidak boleh loncat bulan)
   // — bulan dengan status rumah "nonaktif" dilewati, tidak ada kewajiban
   const unpaidMonths = months12Asc.filter((mk) => getTagihanBulan(myWarga, mk).status === "aktif" && myWarga.statusBayar[mk]?.status === "belum");
+  // opsi "bayar di muka" — 6 bulan ke depan yang belum ditagih sama sekali,
+  // supaya warga yang mau lunasi beberapa bulan sekaligus (mis. mau ke luar
+  // kota lama) bisa langsung dari sini, disambung urut setelah tunggakan
+  const bulanDiMuka = monthsAheadAsc(6).filter((mk) => {
+    const t = getTagihanBulan(myWarga, mk);
+    const entry = myWarga.statusBayar[mk];
+    return t.status === "aktif" && (!entry || entry.status === "belum");
+  });
+  const semuaBulan = [...unpaidMonths, ...bulanDiMuka];
   // selectedCount = jumlah bulan (dihitung dari yang tertua) yang akan dibayar
   const [selectedCount, setSelectedCount] = useState(unpaidMonths.length);
   const [preview, setPreview] = useState(null);
-  const total = unpaidMonths.slice(0, selectedCount).reduce((s, mk) => s + getTagihanBulan(myWarga, mk).tarif, 0);
+  const total = semuaBulan.slice(0, selectedCount).reduce((s, mk) => s + getTagihanBulan(myWarga, mk).tarif, 0);
 
   // Ketuk salah satu baris untuk menentukan "dibayar sampai bulan ini" —
   // semua bulan yang lebih lama otomatis ikut tercentang, tidak bisa pilih acak/loncat.
@@ -2538,11 +2765,11 @@ function PayIPLModal({ myWarga, onCancel, onSubmit }) {
         </div>
 
         <div style={{ fontSize: 13, color: COLORS.inkSoft, marginBottom: 12 }}>
-          Tunggakan dibayar berurutan dari yang paling lama. Ketuk bulan terakhir yang ingin dilunasi — bulan-bulan sebelumnya otomatis ikut tercentang.
+          Tunggakan dibayar berurutan dari yang paling lama. Ketuk bulan terakhir yang ingin dilunasi — bulan-bulan sebelumnya (termasuk bayar di muka) otomatis ikut tercentang.
         </div>
 
-        <div style={{ display: "flex", flexDirection: "column", gap: 6, marginBottom: 16 }}>
-          {unpaidMonths.length === 0 && <div style={{ fontSize: 13, color: COLORS.inkSoft, padding: "10px 0" }}>Tidak ada tagihan yang belum dibayar.</div>}
+        <div style={{ display: "flex", flexDirection: "column", gap: 6, marginBottom: unpaidMonths.length === 0 && bulanDiMuka.length === 0 ? 0 : 6 }}>
+          {unpaidMonths.length === 0 && bulanDiMuka.length === 0 && <div style={{ fontSize: 13, color: COLORS.inkSoft, padding: "10px 0" }}>Tidak ada tagihan yang belum dibayar.</div>}
           {unpaidMonths.map((mk, index) => {
             const checked = index < selectedCount;
             return (
@@ -2557,7 +2784,28 @@ function PayIPLModal({ myWarga, onCancel, onSubmit }) {
           })}
         </div>
 
-        {unpaidMonths.length > 0 && (
+        {bulanDiMuka.length > 0 && (
+          <div style={{ marginBottom: 16 }}>
+            <div style={{ fontSize: 11, fontWeight: 700, color: COLORS.inkFaint, textTransform: "uppercase", letterSpacing: "0.04em", padding: "4px 2px 6px" }}>Bayar di Muka (opsional)</div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+              {bulanDiMuka.map((mk, i) => {
+                const index = unpaidMonths.length + i;
+                const checked = index < selectedCount;
+                return (
+                  <label key={mk} onClick={(e) => { e.preventDefault(); handleRowTap(index); }} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "10px 12px", borderRadius: 10, background: checked ? COLORS.accentSoft : COLORS.bg, cursor: "pointer" }}>
+                    <span style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                      <input type="checkbox" checked={checked} readOnly style={{ width: 17, height: 17, accentColor: COLORS.accent, pointerEvents: "none" }} />
+                      <span style={{ fontWeight: 600, fontSize: 13.5 }}>{monthLabel(mk)}</span>
+                    </span>
+                    <span className="mono" style={{ fontSize: 13, color: COLORS.inkSoft }}>{formatRp(getTagihanBulan(myWarga, mk).tarif)}</span>
+                  </label>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
+        {semuaBulan.length > 0 && (
           <>
             <div style={{ display: "flex", justifyContent: "space-between", padding: "12px 0", borderTop: `1px solid ${COLORS.divider}`, marginBottom: 14 }}>
               <span style={{ fontWeight: 700, fontSize: 14 }}>Total ({selectedCount} bulan)</span>
@@ -2583,7 +2831,7 @@ function PayIPLModal({ myWarga, onCancel, onSubmit }) {
               </label>
             </Field>
 
-            <Btn onClick={() => { if (selectedCount === 0 || !preview) return; onSubmit(unpaidMonths.slice(0, selectedCount), preview); }} disabled={selectedCount === 0 || !preview} style={{ width: "100%", marginTop: 16, padding: "12px 0", fontSize: 14.5 }}>
+            <Btn onClick={() => { if (selectedCount === 0 || !preview) return; onSubmit(semuaBulan.slice(0, selectedCount), preview); }} disabled={selectedCount === 0 || !preview} style={{ width: "100%", marginTop: 16, padding: "12px 0", fontSize: 14.5 }}>
               Kirim Bukti Pembayaran
             </Btn>
           </>
