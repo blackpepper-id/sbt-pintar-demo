@@ -879,7 +879,7 @@ function PosAnggaranManager({ posAnggaran, onAddPos, onRenamePos, onDeletePos, o
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, marginBottom: 6 }}>
                   {renaming === p.id ? (
                     <div style={{ display: "flex", gap: 6, flex: 1 }}>
-                      <input autoFocus value={renameValue} onChange={(e) => setRenameValue(e.target.value)} style={{ ...inputStyle, flex: 1, padding: "6px 10px" }} />
+                      <input autoFocus value={renameValue} onChange={(e) => setRenameValue(e.target.value)} style={{ ...inputStyle, flex: 1, minWidth: 0, padding: "6px 10px" }} />
                       <Btn type="button" onClick={() => { onRenamePos(p.id, renameValue); setRenaming(null); }} style={{ padding: "6px 10px", fontSize: 12 }}>Simpan</Btn>
                       <Btn type="button" variant="ghost" onClick={() => setRenaming(null)} style={{ padding: "6px 10px", fontSize: 12 }}>Batal</Btn>
                     </div>
@@ -921,7 +921,7 @@ function PosAnggaranManager({ posAnggaran, onAddPos, onRenamePos, onDeletePos, o
                     value={subBaruInput[p.id] || ""}
                     onChange={(e) => setSubBaruInput((prev) => ({ ...prev, [p.id]: e.target.value }))}
                     placeholder="Sub-kategori baru"
-                    style={{ ...inputStyle, flex: 1, padding: "6px 10px", fontSize: 12.5 }}
+                    style={{ ...inputStyle, flex: 1, minWidth: 0, padding: "6px 10px", fontSize: 12.5 }}
                     onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); onAddSub(p.id, subBaruInput[p.id] || ""); setSubBaruInput((prev) => ({ ...prev, [p.id]: "" })); } }}
                   />
                   <Btn type="button" variant="ghost" onClick={() => { onAddSub(p.id, subBaruInput[p.id] || ""); setSubBaruInput((prev) => ({ ...prev, [p.id]: "" })); }} style={{ padding: "6px 12px", fontSize: 12 }}>+ Sub</Btn>
@@ -938,11 +938,11 @@ function PosAnggaranManager({ posAnggaran, onAddPos, onRenamePos, onDeletePos, o
           {posAnggaran.map((g) => <option key={g.grup} value={g.grup} />)}
         </datalist>
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 8 }}>
-          <input list="daftar-grup-anggaran" value={grupBaru} onChange={(e) => setGrupBaru(e.target.value)} placeholder="Grup (pilih/ketik baru)" style={{ ...inputStyle, fontSize: 12.5 }} />
-          <input value={namaPosBaru} onChange={(e) => setNamaPosBaru(e.target.value)} placeholder="Nama pos" style={{ ...inputStyle, fontSize: 12.5 }} />
+          <input list="daftar-grup-anggaran" value={grupBaru} onChange={(e) => setGrupBaru(e.target.value)} placeholder="Grup (pilih/ketik baru)" style={{ ...inputStyle, minWidth: 0, fontSize: 12.5 }} />
+          <input value={namaPosBaru} onChange={(e) => setNamaPosBaru(e.target.value)} placeholder="Nama pos" style={{ ...inputStyle, minWidth: 0, fontSize: 12.5 }} />
         </div>
         <div style={{ display: "flex", gap: 8 }}>
-          <input type="number" value={paguBaru} onChange={(e) => setPaguBaru(e.target.value)} placeholder="Pagu/tahun (Rp)" style={{ ...inputStyle, flex: 1, fontSize: 12.5 }} />
+          <input type="number" value={paguBaru} onChange={(e) => setPaguBaru(e.target.value)} placeholder="Pagu/tahun (Rp)" style={{ ...inputStyle, flex: 1, minWidth: 0, fontSize: 12.5 }} />
           <Btn type="button" onClick={submitPosBaru}><Plus size={14} /> Tambah Pos</Btn>
         </div>
       </div>
@@ -1565,6 +1565,8 @@ export default function SBTPintar() {
     <div className="app-root" style={{ minHeight: "100%", background: COLORS.bg, fontFamily: "'Inter', sans-serif", color: COLORS.ink, paddingBottom: 90 }}>
       <style>{`
         * { box-sizing: border-box; }
+        html, body { overflow-x: hidden; max-width: 100vw; }
+        .app-root { overflow-x: hidden; }
         table { border-collapse: collapse; width: 100%; }
         th, td { text-align: left; padding: 11px 12px; font-size: 13.5px; }
         thead th { font-size: 11px; letter-spacing: 0.02em; color: ${COLORS.inkSoft}; font-weight: 600; border-bottom: 1px solid ${COLORS.divider}; }
