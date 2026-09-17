@@ -73,22 +73,6 @@ function dayLabelShort(iso) {
   const bulan = ["Jan", "Feb", "Mar", "Apr", "Mei", "Jun", "Jul", "Agu", "Sep", "Okt", "Nov", "Des"];
   return `${hari[dt.getDay()]}, ${dt.getDate()} ${bulan[dt.getMonth()]} ${y}`;
 }
-function buildCalendarGrid(days = 30) {
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-  const earliest = new Date(today);
-  earliest.setDate(earliest.getDate() - (days - 1));
-  const gridStart = new Date(earliest);
-  gridStart.setDate(gridStart.getDate() - gridStart.getDay());
-  const cells = [];
-  for (let i = 0; i < 35; i++) {
-    const d = new Date(gridStart);
-    d.setDate(d.getDate() + i);
-    const dayOffset = Math.round((today - d) / 86400000);
-    cells.push({ iso: toLocalISODate(d), tanggalNum: d.getDate(), dayOffset, inRange: dayOffset >= 0 && dayOffset < days, isToday: dayOffset === 0 });
-  }
-  return cells;
-}
 
 
 const now = new Date();
@@ -146,7 +130,7 @@ const SCREEN_ACCESS = [
   { id: "screen_dashboard", tabId: "dashboard", label: "Ringkasan" },
   { id: "screen_laporan", tabId: "laporan", label: "Mutasi Transaksi" },
   { id: "screen_iuran", tabId: "iuran", label: "Tagihan IPL" },
-  { id: "screen_absensi", tabId: "absensi", label: "Absensi Security" },
+  { id: "screen_absensi", tabId: "absensi", label: "Log Kejadian" },
   { id: "screen_darurat", tabId: "darurat", label: "Kontak Darurat" },
   { id: "screen_kegiatan", tabId: "kegiatan", label: "Kegiatan" },
   { id: "screen_warga", tabId: "warga", label: "Warga" },
@@ -396,41 +380,38 @@ const seedKegiatan = [
   },
 ];
 
-// ---------- data contoh absensi security (30 hari terakhir) ----------
-// petugas pagi & malam bergantian antar 3 orang security, mayoritas "Aman
-// Terkendali", beberapa "Ada Gangguan", beberapa sengaja kosong (belum lapor)
-const ABSENSI_KEJADIAN = [
-  { back: 10, shift: "malam", keterangan: "Ada suara mencurigakan dari arah pagar belakang Blok C sekitar jam 23.30, sudah dicek keliling, tidak ditemukan orang." },
-  { back: 23, shift: "malam", keterangan: "Keributan kecil antar warga di area parkir, sudah dilerai dan diarahkan ke pengurus." },
-  { back: 18, shift: "pagi", keterangan: "Kendaraan tidak dikenal parkir lama di depan pos, sudah ditanya dan sudah pergi." },
-];
-const ABSENSI_KOSONG_OFFSET = new Set([2, 15]); // hari ini dianggap belum lapor untuk kedua shift
+// ---------- data contoh Log Kejadian (30 hari terakhir + sebagian riwayat lama) ----------
+const KATEGORI_KEJADIAN = ["Pencurian", "Kebakaran", "Gangguan Ketertiban", "Aktivitas Mencurigakan", "Perkelahian/Kekerasan", "Kerusakan Fasilitas", "Kecelakaan", "Kendaraan", "Lainnya"];
+const hariLalu = (n) => toLocalISODate(new Date(new Date().setDate(new Date().getDate() - n)));
+const seedLogKejadian = [
+  // --- 30 hari terakhir — "Aktivitas Mencurigakan" sengaja paling banyak dilaporkan ---
+  { id: "log-1", tanggal: hariLalu(1), jam: "22:40", kategori: "Aktivitas Mencurigakan", deskripsi: "Ada orang tidak dikenal mondar-mandir di dekat pos satpam, sudah didekati dan langsung pergi.", pelaporNama: "Pak Fajar", pelaporRole: "security", status: "baru", catatanTindakLanjut: "" },
+  { id: "log-2", tanggal: hariLalu(2), jam: "23:15", kategori: "Aktivitas Mencurigakan", deskripsi: "Ada suara mencurigakan dari arah pagar belakang Blok C, sudah dicek keliling oleh security, tidak ditemukan orang.", pelaporNama: "Pak Fajar", pelaporRole: "security", status: "ditindaklanjuti", catatanTindakLanjut: "Sudah dicek, kondisi aman. Pagar akan ditambah lampu sorot.", ditindaklanjutiOleh: "Pak Anwar" },
+  { id: "log-3", tanggal: hariLalu(4), jam: "21:30", kategori: "Aktivitas Mencurigakan", deskripsi: "Kendaraan mencurigakan berputar-putar 3x di sekitar cluster sebelum akhirnya pergi.", pelaporNama: "Rina Marlina", pelaporRole: "warga", status: "baru", catatanTindakLanjut: "" },
+  { id: "log-4", tanggal: hariLalu(11), jam: "01:10", kategori: "Aktivitas Mencurigakan", deskripsi: "Terdengar suara pagar digoyang-goyang di Blok D, security langsung patroli ke lokasi.", pelaporNama: "Pak Sandi", pelaporRole: "security", status: "ditindaklanjuti", catatanTindakLanjut: "Dicek, ternyata kucing warga. Kondisi aman.", ditindaklanjutiOleh: "Pak Sandi" },
 
-const seedAbsensiSecurity = (() => {
-  const list = [];
-  const namaSecurityByShift = { pagi: "Pak Sandi", malam: "Pak Fajar" };
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-  for (let back = 0; back < 30; back++) {
-    if (ABSENSI_KOSONG_OFFSET.has(back)) continue; // sengaja tidak dibuat -> "belum lapor"
-    const d = new Date(today);
-    d.setDate(d.getDate() - back);
-    const iso = toLocalISODate(d);
-    ["pagi", "malam"].forEach((shift) => {
-      const kejadian = ABSENSI_KEJADIAN.find((k) => k.back === back && k.shift === shift);
-      list.push({
-        id: `abs-${iso}-${shift}`,
-        tanggal: iso,
-        shift,
-        petugasNama: namaSecurityByShift[shift],
-        kondisi: kejadian ? "Ada Gangguan" : "Aman Terkendali",
-        keterangan: kejadian ? kejadian.keterangan : "",
-        waktuLapor: shift === "pagi" ? "07:00" : "19:00",
-      });
-    });
-  }
-  return list;
-})();
+  { id: "log-5", tanggal: hariLalu(3), jam: "19:50", kategori: "Gangguan Ketertiban", deskripsi: "Musik dari salah satu rumah terlalu keras hingga larut malam, beberapa warga terganggu.", pelaporNama: "Siti Rahma", pelaporRole: "warga", status: "baru", catatanTindakLanjut: "" },
+  { id: "log-6", tanggal: hariLalu(9), jam: "20:05", kategori: "Gangguan Ketertiban", deskripsi: "Keributan kecil antar warga di area parkir, sudah dilerai dan diarahkan ke pengurus.", pelaporNama: "Pak Sandi", pelaporRole: "security", status: "ditindaklanjuti", catatanTindakLanjut: "Sudah dimediasi pengurus, kedua pihak sudah damai.", ditindaklanjutiOleh: "Pak Fajar" },
+  { id: "log-7", tanggal: hariLalu(16), jam: "07:15", kategori: "Gangguan Ketertiban", deskripsi: "Truk material parkir sembarangan menutup akses jalan cluster selama 2 jam.", pelaporNama: "Pak Anwar", pelaporRole: "pengurus", status: "ditindaklanjuti", catatanTindakLanjut: "Sudah ditegur pemilik proyek, tidak akan diulang.", ditindaklanjutiOleh: "Pak Anwar" },
+
+  { id: "log-8", tanggal: hariLalu(6), jam: "16:40", kategori: "Kerusakan Fasilitas", deskripsi: "Lampu jalan depan Blok B mati sejak 2 hari lalu, area jadi gelap malam hari.", pelaporNama: "Dewi Lestari", pelaporRole: "warga", status: "baru", catatanTindakLanjut: "" },
+  { id: "log-9", tanggal: hariLalu(13), jam: "08:30", kategori: "Kerusakan Fasilitas", deskripsi: "Pagar pembatas taman roboh kena angin kencang semalam.", pelaporNama: "Pak Anwar", pelaporRole: "pengurus", status: "ditindaklanjuti", catatanTindakLanjut: "Sudah diperbaiki sementara, akan diganti permanen minggu depan.", ditindaklanjutiOleh: "Pak Sandi" },
+  { id: "log-10", tanggal: hariLalu(22), jam: "17:00", kategori: "Kerusakan Fasilitas", deskripsi: "CCTV pintu masuk cluster mati, kemungkinan kena petir semalam.", pelaporNama: "Pak Fajar", pelaporRole: "security", status: "baru", catatanTindakLanjut: "" },
+
+  { id: "log-11", tanggal: hariLalu(14), jam: "09:20", kategori: "Pencurian", deskripsi: "Sepeda anak hilang dari halaman rumah, terakhir terlihat sore sebelumnya.", pelaporNama: "Agus Wijaya", pelaporRole: "warga", status: "baru", catatanTindakLanjut: "" },
+  { id: "log-12", tanggal: hariLalu(25), jam: "06:45", kategori: "Pencurian", deskripsi: "Helm hilang dari motor yang diparkir di teras, diduga kejadian dini hari.", pelaporNama: "Hendra Gunawan", pelaporRole: "warga", status: "ditindaklanjuti", catatanTindakLanjut: "Sudah dilaporkan ke security untuk perketat ronda malam.", ditindaklanjutiOleh: "Pak Anwar" },
+
+  { id: "log-13", tanggal: hariLalu(18), jam: "13:50", kategori: "Kendaraan", deskripsi: "Kendaraan tidak dikenal parkir lama di depan pos, sudah ditanya dan sudah pergi.", pelaporNama: "Pak Sandi", pelaporRole: "security", status: "ditindaklanjuti", catatanTindakLanjut: "Sudah ditanya, ternyata tamu warga yang menunggu jemputan.", ditindaklanjutiOleh: "Pak Sandi" },
+  { id: "log-14", tanggal: hariLalu(20), jam: "18:20", kategori: "Kendaraan", deskripsi: "Senggolan kecil antar motor warga di tikungan dekat pos satpam, tidak ada korban.", pelaporNama: "Joko Prasetyo", pelaporRole: "warga", status: "ditindaklanjuti", catatanTindakLanjut: "Sudah diselesaikan baik-baik oleh kedua pihak.", ditindaklanjutiOleh: "Pak Fajar" },
+
+  { id: "log-15", tanggal: hariLalu(8), jam: "14:10", kategori: "Kebakaran", deskripsi: "Asap tebal dari pembakaran sampah di lahan kosong sebelah cluster, sempat bikin panik warga sekitar.", pelaporNama: "Nur Aini", pelaporRole: "warga", status: "ditindaklanjuti", catatanTindakLanjut: "Sudah dipadamkan pemilik lahan, tidak menjalar ke area cluster.", ditindaklanjutiOleh: "Pak Anwar" },
+  { id: "log-16", tanggal: hariLalu(27), jam: "15:35", kategori: "Perkelahian/Kekerasan", deskripsi: "Cekcok antar pekerja proyek di luar cluster, sempat terdengar sampai area pos satpam.", pelaporNama: "Pak Fajar", pelaporRole: "security", status: "baru", catatanTindakLanjut: "" },
+  { id: "log-17", tanggal: hariLalu(29), jam: "07:50", kategori: "Kecelakaan", deskripsi: "Anak warga jatuh dari sepeda di area taman, luka lecet ringan.", pelaporNama: "Yuni Anggraini", pelaporRole: "warga", status: "ditindaklanjuti", catatanTindakLanjut: "Sudah ditangani orang tua, kondisi anak baik.", ditindaklanjutiOleh: "Pak Sandi" },
+
+  // --- riwayat lebih lama (di luar 30 hari, cuma muncul di "Riwayat Keseluruhan") ---
+  { id: "log-18", tanggal: hariLalu(45), jam: "22:00", kategori: "Aktivitas Mencurigakan", deskripsi: "Ada laporan orang asing masuk lewat pintu belakang, sudah dicek dan ternyata tamu warga.", pelaporNama: "Pak Sandi", pelaporRole: "security", status: "ditindaklanjuti", catatanTindakLanjut: "Sudah dikonfirmasi ke pemilik rumah.", ditindaklanjutiOleh: "Pak Anwar" },
+  { id: "log-19", tanggal: hariLalu(52), jam: "10:15", kategori: "Lainnya", deskripsi: "Pohon tumbang menutup sebagian jalan setelah hujan deras.", pelaporNama: "Pak Anwar", pelaporRole: "pengurus", status: "ditindaklanjuti", catatanTindakLanjut: "Sudah dipotong & dibersihkan tim kebersihan.", ditindaklanjutiOleh: "Pak Sandi" },
+];
 
 // transaksi pemasukan dibangkitkan dari status IPL "lunas" pada 3 bulan terakhir saja
 // (selaras dengan cakupan dropdown bulan di menu Laporan)
@@ -578,7 +559,7 @@ const COLORS = {
 // ============================================================
 // storage
 // ============================================================
-const KEYS = { warga: "sbt:warga:v6", transaksi: "sbt:transaksi:v4", kegiatan: "sbt:kegiatan:v3", pengguna: "sbt:pengguna:v7", absensi: "sbt:absensi:v1", jabatanOptions: "sbt:jabatanoptions:v1", kontakDarurat: "sbt:kontakdarurat:v2", perangkatDesa: "sbt:perangkatdesa:v2", posAnggaran: "sbt:posanggaran:v1", thrConfig: "sbt:thrconfig:v1", openingConfig: "sbt:openingconfig:v1", permissions: "sbt:permissions:v1" };
+const KEYS = { warga: "sbt:warga:v6", transaksi: "sbt:transaksi:v4", kegiatan: "sbt:kegiatan:v3", pengguna: "sbt:pengguna:v7", logKejadian: "sbt:logkejadian:v4", jabatanOptions: "sbt:jabatanoptions:v1", kontakDarurat: "sbt:kontakdarurat:v2", perangkatDesa: "sbt:perangkatdesa:v2", posAnggaran: "sbt:posanggaran:v1", thrConfig: "sbt:thrconfig:v1", openingConfig: "sbt:openingconfig:v1", permissions: "sbt:permissions:v1" };
 async function loadKey(key, fallback) {
   try {
     if (typeof window !== "undefined" && window.storage) {
@@ -777,10 +758,17 @@ function MasukKeluarChart({ data }) {
   );
 }
 
-function KpiCard({ icon: Icon, iconBg, iconColor, cardBg, label, value, valueColor, style }) {
-  return (
-    <Card style={{ padding: 13, background: cardBg || COLORS.card, display: "flex", alignItems: "center", gap: 11, ...style }}>
-      <div style={{ width: 32, height: 32, borderRadius: 999, background: iconBg, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+function KpiCard({ icon: Icon, iconBg, iconColor, cardBg, label, value, valueColor, style, onClick, active, activeBg }) {
+  const card = (
+    <Card
+      style={{
+        padding: 13, display: "flex", alignItems: "center", gap: 11,
+        background: onClick && active ? (activeBg || iconBg) : (cardBg || COLORS.card),
+        border: onClick && active ? `2px solid ${valueColor || COLORS.accent}` : onClick ? "2px solid transparent" : undefined,
+        ...style,
+      }}
+    >
+      <div style={{ width: 32, height: 32, borderRadius: 999, background: onClick && active ? "#fff" : iconBg, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
         <Icon size={15} color={iconColor} />
       </div>
       <div style={{ minWidth: 0 }}>
@@ -789,6 +777,8 @@ function KpiCard({ icon: Icon, iconBg, iconColor, cardBg, label, value, valueCol
       </div>
     </Card>
   );
+  if (!onClick) return card;
+  return <div onClick={onClick} style={{ cursor: "pointer" }}>{card}</div>;
 }
 
 function DualStatCard({ icon: Icon, iconBg, iconColor, title, statA, statB, style }) {
@@ -892,6 +882,28 @@ function PemasukanBreakdownItem({ label, value, target, color, note }) {
       ) : (
         note && <div style={{ fontSize: 11, color: COLORS.inkFaint, marginTop: 2 }}>{note}</div>
       )}
+    </div>
+  );
+}
+
+// dipakai khusus di kartu "Target Pemasukan & Realisasi" — gaya sama persis
+// dengan header grup di Budget Plan & Realisasi (label + "realisasi / target"
+// sebaris, progress bar di bawahnya). Tanpa target (mis. Saldo Akhir Tahun
+// Lalu, murni angka referensi) bar otomatis penuh, bukan disembunyikan.
+function TargetTahunanItem({ label, realisasi, target, note }) {
+  const pct = target > 0 ? Math.min(100, (realisasi / target) * 100) : 100;
+  return (
+    <div>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, marginBottom: 6 }}>
+        <span style={{ fontWeight: 700, fontSize: 13, color: COLORS.accent }}>{label}</span>
+        <span className="mono" style={{ fontSize: 12.5, fontWeight: 700, color: COLORS.ink, flexShrink: 0 }}>
+          {formatRp(realisasi)}{target > 0 && <span style={{ color: COLORS.inkFaint, fontWeight: 500 }}> / {formatRp(target)}</span>}
+        </span>
+      </div>
+      <div style={{ height: 7, background: COLORS.bg, borderRadius: 4 }}>
+        <div style={{ height: "100%", width: `${pct}%`, background: COLORS.accent, borderRadius: 4 }} />
+      </div>
+      {note && <div style={{ fontSize: 11, color: COLORS.inkFaint, marginTop: 4 }}>{note}</div>}
     </div>
   );
 }
@@ -1082,7 +1094,7 @@ export default function SBTPintar() {
   const [warga, setWarga] = useState(seedWarga);
   const [transaksi, setTransaksi] = useState(seedTransaksi);
   const [kegiatan, setKegiatan] = useState(seedKegiatan);
-  const [absensiSecurity, setAbsensiSecurity] = useState(seedAbsensiSecurity);
+  const [logKejadian, setLogKejadian] = useState(seedLogKejadian);
   const [jabatanOptions, setJabatanOptions] = useState(JABATAN_OPTIONS_DEFAULT);
   const [kontakDarurat, setKontakDarurat] = useState(seedKontakDarurat);
   const [perangkatDesa, setPerangkatDesa] = useState(seedPerangkatDesa);
@@ -1140,19 +1152,19 @@ export default function SBTPintar() {
     document.head.appendChild(link);
 
     (async () => {
-      const [w, t, k, p, abs, so, kd, pd, pa, tc, oc, pm] = await Promise.all([
+      const [w, t, k, p, so, kd, pd, pa, tc, oc, pm, lk] = await Promise.all([
         loadKey(KEYS.warga, null), loadKey(KEYS.transaksi, null),
         loadKey(KEYS.kegiatan, null), loadKey(KEYS.pengguna, null),
-        loadKey(KEYS.absensi, null), loadKey(KEYS.jabatanOptions, null),
+        loadKey(KEYS.jabatanOptions, null),
         loadKey(KEYS.kontakDarurat, null), loadKey(KEYS.perangkatDesa, null),
         loadKey(KEYS.posAnggaran, null), loadKey(KEYS.thrConfig, null),
         loadKey(KEYS.openingConfig, null), loadKey(KEYS.permissions, null),
+        loadKey(KEYS.logKejadian, null),
       ]);
       if (w) setWarga(w); else saveKey(KEYS.warga, seedWarga);
       if (t) setTransaksi(t); else saveKey(KEYS.transaksi, seedTransaksi);
       if (k) setKegiatan(k); else saveKey(KEYS.kegiatan, seedKegiatan);
       if (p) setPengguna(p); else saveKey(KEYS.pengguna, seedPengguna);
-      if (abs) setAbsensiSecurity(abs); else saveKey(KEYS.absensi, seedAbsensiSecurity);
       if (so) setJabatanOptions(so); else saveKey(KEYS.jabatanOptions, JABATAN_OPTIONS_DEFAULT);
       if (kd) setKontakDarurat(kd); else saveKey(KEYS.kontakDarurat, seedKontakDarurat);
       if (pd) setPerangkatDesa(pd); else saveKey(KEYS.perangkatDesa, seedPerangkatDesa);
@@ -1160,6 +1172,7 @@ export default function SBTPintar() {
       if (tc) setThrConfig(tc); else saveKey(KEYS.thrConfig, THR_CONFIG_DEFAULT);
       if (oc) setOpeningConfig(oc); else saveKey(KEYS.openingConfig, OPENING_CONFIG_DEFAULT);
       if (pm) setPermissions(pm); else saveKey(KEYS.permissions, PERMISSIONS_DEFAULT);
+      if (lk) setLogKejadian(lk); else saveKey(KEYS.logKejadian, seedLogKejadian);
       setLoading(false);
     })();
   }, []);
@@ -1371,14 +1384,22 @@ export default function SBTPintar() {
     setToast("Catatan diperbarui.");
   };
 
-  // ---- Absensi Security ----
-  const addAbsensiLaporan = (data) => {
-    setAbsensiSecurity((prev) => {
-      const next = [...prev, { id: uid(), ...data, petugasNama: namaAktif, waktuLapor: new Date().toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit" }) }];
-      saveKey(KEYS.absensi, next);
+  // ---- Log Kejadian & Insiden ----
+  const addLogKejadian = (data) => {
+    setLogKejadian((prev) => {
+      const next = [{ id: uid(), ...data, pelaporNama: namaAktif, pelaporRole: role, status: "baru", catatanTindakLanjut: "" }, ...prev];
+      saveKey(KEYS.logKejadian, next);
       return next;
     });
-    setToast("Laporan jaga tersimpan.");
+    setToast("Laporan kejadian tersimpan.");
+  };
+  const updateStatusLogKejadian = (id, status, catatanTindakLanjut) => {
+    setLogKejadian((prev) => {
+      const next = prev.map((l) => l.id === id ? { ...l, status, catatanTindakLanjut: catatanTindakLanjut ?? l.catatanTindakLanjut, ditindaklanjutiOleh: status === "ditindaklanjuti" ? namaAktif : l.ditindaklanjutiOleh } : l);
+      saveKey(KEYS.logKejadian, next);
+      return next;
+    });
+    setToast("Status kejadian diperbarui.");
   };
 
   // ---- Akses pengguna ----
@@ -1634,8 +1655,8 @@ export default function SBTPintar() {
     const totalSampaiAkhirTahunLalu = transaksi.filter((t) => monthKeyOf(t.tanggal) <= akhirTahunLalu).reduce((s, t) => s + (t.tipe === "masuk" ? t.jumlah : -t.jumlah), 0);
     return openingConfig.saldoAkhirTahunLalu + totalSampaiAkhirTahunLalu;
   }, [transaksi, tahunLalu, openingConfig]);
-  const totalTargetPemasukan = targetIPLTahunan + targetTunggakanTahunLalu;
-  const totalRealisasiPemasukan = realisasiIPLTahunIni + realisasiTunggakanTahunLalu;
+  const totalTargetPemasukan = targetIPLTahunan + targetTunggakanTahunLalu + saldoAkhirTahunLalu;
+  const totalRealisasiPemasukan = realisasiIPLTahunIni + realisasiTunggakanTahunLalu + saldoAkhirTahunLalu;
 
   const laporanTx = useMemo(() => transaksi.filter((t) => monthKeyOf(t.tanggal) === laporanBulan), [transaksi, laporanBulan]);
   const laporanMasuk = laporanTx.filter((t) => t.tipe === "masuk").reduce((s, t) => s + t.jumlah, 0);
@@ -1692,7 +1713,7 @@ export default function SBTPintar() {
     ...(hasAccess("screen_dashboard", role) ? [{ id: "dashboard", label: "Ringkasan", icon: LayoutDashboard }] : []),
     ...(hasAccess("screen_laporan", role) ? [{ id: "laporan", label: "Mutasi Transaksi", icon: FileText }] : []),
     ...(hasAccess("screen_iuran", role) ? [{ id: "iuran", label: "Tagihan IPL", icon: Wallet }] : []),
-    ...(hasAccess("screen_absensi", role) ? [{ id: "absensi", label: "Absensi Security", icon: ClipboardCheck }] : []),
+    ...(hasAccess("screen_absensi", role) ? [{ id: "absensi", label: "Log Kejadian", icon: ClipboardCheck }] : []),
     ...(hasAccess("screen_darurat", role) ? [{ id: "darurat", label: "Kontak Darurat", icon: Siren }] : []),
     ...(hasAccess("screen_kegiatan", role) ? [{ id: "kegiatan", label: "Kegiatan", icon: CalendarDays }] : []),
     ...(hasAccess("screen_warga", role) ? [{ id: "warga", label: "Warga", icon: UserCog }] : []),
@@ -1850,27 +1871,24 @@ export default function SBTPintar() {
                     <div className="mono" style={{ fontSize: 12.5, color: totalRealisasiPemasukan >= totalTargetPemasukan ? COLORS.success : COLORS.inkSoft }}>{formatRp(totalRealisasiPemasukan)} / {formatRp(totalTargetPemasukan)}</div>
                   </div>
                 </div>
-                <div style={{ padding: 18, display: "flex", flexDirection: "column", gap: 18 }}>
-                  <PemasukanBreakdownItem
-                    label="Tagihan IPL Warga"
-                    value={realisasiIPLTahunIni}
+                <div style={{ padding: 18, display: "flex", flexDirection: "column", gap: 20 }}>
+                  <TargetTahunanItem
+                    label={`Pembayaran IPL ${tahunBerjalan}`}
+                    realisasi={realisasiIPLTahunIni}
                     target={targetIPLTahunan}
-                    color={COLORS.accent}
                     note="total tahun berjalan vs target 1 tahun"
                   />
-                  <PemasukanBreakdownItem
-                    label={`Pembayaran Tunggakan ${tahunLalu}`}
-                    value={realisasiTunggakanTahunLalu}
-                    target={targetTunggakanTahunLalu > 0 ? targetTunggakanTahunLalu : null}
-                    color={COLORS.warning}
+                  <TargetTahunanItem
+                    label={`Pembayaran Tunggakan IPL ${tahunLalu}`}
+                    realisasi={realisasiTunggakanTahunLalu}
+                    target={targetTunggakanTahunLalu}
                     note={`dari tunggakan ${tahunLalu} (diisi manual di Setting)`}
                   />
-                  <PemasukanBreakdownItem
-                    label={`Saldo Akhir ${tahunLalu}`}
-                    value={saldoAkhirTahunLalu}
-                    target={null}
-                    color={COLORS.sageDeep}
-                    note="posisi kas per 31 Desember tahun lalu — otomatis"
+                  <TargetTahunanItem
+                    label={`Transfer Saldo Akhir ${tahunLalu}`}
+                    realisasi={saldoAkhirTahunLalu}
+                    target={0}
+                    note="posisi kas per 31 Desember tahun lalu — otomatis, tanpa target"
                   />
                 </div>
               </Card>
@@ -2301,11 +2319,11 @@ export default function SBTPintar() {
           )}
 
           {tab === "absensi" && (
-            <AbsensiSecurityView
-              absensiSecurity={absensiSecurity}
+            <LogKejadianView
+              logKejadian={logKejadian}
               role={role}
-              namaAktif={namaAktif}
-              onSubmit={addAbsensiLaporan}
+              onAddLogKejadian={addLogKejadian}
+              onUpdateStatusLogKejadian={updateStatusLogKejadian}
             />
           )}
 
@@ -3012,199 +3030,244 @@ function ThrCellModal({ data, thrConfig, canVerifikasi, onClose, onVerifikasi, o
   );
 }
 
-// ============================================================
-// Absensi Security — kalender interaktif + daftar laporan jaga
-// ============================================================
-const KONDISI_ABSENSI = ["Aman Terkendali", "Ada Gangguan"];
-
-function StripStatus({ entry }) {
-  let bg = COLORS.inkFaint; // belum lapor
-  if (entry) bg = entry.kondisi === "Ada Gangguan" ? COLORS.danger : COLORS.success;
-  return <div style={{ flex: 1, height: 6, borderRadius: 2, background: bg }} />;
+function KategoriBadge({ kategori, onWarning }) {
+  return (
+    <span style={{
+      fontSize: 10.5, fontWeight: 700, padding: "2px 8px", borderRadius: 999, textTransform: "uppercase", letterSpacing: "0.03em",
+      color: onWarning ? COLORS.warning : COLORS.accent,
+      background: onWarning ? "#fff" : COLORS.accentSoft,
+    }}>{kategori}</span>
+  );
 }
 
-function AbsensiCard({ iso, shift, entry }) {
-  const shiftLabel = shift === "pagi" ? "Pagi" : "Malam";
-  if (!entry) {
-    return (
-      <Card style={{ padding: 16, marginBottom: 10 }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 7, fontSize: 13, color: COLORS.inkFaint }}>
-          <AlertTriangle size={14} />
-          {dayLabelShort(iso)} · Shift {shiftLabel} — belum ada laporan masuk.
-        </div>
-      </Card>
-    );
-  }
-  const isGangguan = entry.kondisi === "Ada Gangguan";
+function LogKejadianCard({ entry, canTindakLanjut, onUpdateStatus }) {
+  const [showTindakLanjut, setShowTindakLanjut] = useState(false);
+  const [catatan, setCatatan] = useState("");
+  const sudahDitindaklanjuti = entry.status === "ditindaklanjuti";
+
   return (
-    <Card style={{ padding: 16, marginBottom: 10 }}>
+    <Card style={{ padding: 16, marginBottom: 10, background: sudahDitindaklanjuti ? COLORS.card : "rgba(201,138,27,0.14)", border: sudahDitindaklanjuti ? undefined : `1.5px solid rgba(201,138,27,0.35)` }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8, flexWrap: "wrap", gap: 6 }}>
-        <span style={{ fontSize: 12, color: COLORS.inkSoft }}>{dayLabelShort(iso)} · Shift {shiftLabel} · {entry.waktuLapor}</span>
-        <span style={{ display: "inline-flex", alignItems: "center", gap: 4, padding: "3px 10px", borderRadius: 999, fontSize: 11.5, fontWeight: 700, background: isGangguan ? COLORS.dangerSoft : COLORS.successSoft, color: isGangguan ? COLORS.danger : COLORS.success }}>
-          {isGangguan ? <AlertTriangle size={12} /> : <CheckCircle2 size={12} />}
-          {entry.kondisi}
+        <span className="mono" style={{ fontSize: 12, color: sudahDitindaklanjuti ? COLORS.inkSoft : COLORS.warning, fontWeight: sudahDitindaklanjuti ? 400 : 600 }}>{dayLabelShort(entry.tanggal)} · {entry.jam}</span>
+        <span style={{ display: "inline-flex", alignItems: "center", gap: 4, padding: "3px 10px", borderRadius: 999, fontSize: 11.5, fontWeight: 700, background: sudahDitindaklanjuti ? COLORS.successSoft : "#fff", color: sudahDitindaklanjuti ? COLORS.success : COLORS.warning }}>
+          {sudahDitindaklanjuti ? <CheckCircle2 size={12} /> : <Clock size={12} />}
+          {sudahDitindaklanjuti ? "Sudah Ditindaklanjuti" : "Belum Ditindaklanjuti"}
         </span>
       </div>
-      <div style={{ fontWeight: 600, fontSize: 13.5 }}>{entry.petugasNama}</div>
-      {entry.keterangan && (
+      <div style={{ marginBottom: 8 }}>
+        <KategoriBadge kategori={entry.kategori} onWarning={!sudahDitindaklanjuti} />
+      </div>
+      <div style={{ fontSize: 13.5, color: COLORS.ink, lineHeight: 1.5, marginBottom: 8 }}>{entry.deskripsi}</div>
+      <div style={{ fontSize: 11.5, color: COLORS.inkFaint }}>Pelapor: {entry.pelaporNama} ({roleLabel[entry.pelaporRole] || entry.pelaporRole})</div>
+
+      {sudahDitindaklanjuti && (
         <div style={{ marginTop: 10, paddingTop: 10, borderTop: `1px solid ${COLORS.divider}` }}>
-          <div style={{ fontSize: 11, color: COLORS.inkFaint, marginBottom: 3 }}>Keterangan</div>
-          <div style={{ fontSize: 13, color: COLORS.inkSoft, lineHeight: 1.5 }}>{entry.keterangan}</div>
+          <div style={{ fontSize: 11, color: COLORS.inkFaint, marginBottom: 3 }}>
+            Ditindaklanjuti oleh{entry.ditindaklanjutiOleh ? `: ${entry.ditindaklanjutiOleh}` : ""}
+          </div>
+          {entry.catatanTindakLanjut && <div style={{ fontSize: 13, color: COLORS.inkSoft, lineHeight: 1.5 }}>{entry.catatanTindakLanjut}</div>}
         </div>
+      )}
+
+      {canTindakLanjut && !sudahDitindaklanjuti && (
+        showTindakLanjut ? (
+          <div style={{ marginTop: 12, paddingTop: 12, borderTop: `1px solid rgba(0,0,0,0.08)` }}>
+            <Field label="Catatan Tindak Lanjut (opsional)">
+              <textarea value={catatan} onChange={(e) => setCatatan(e.target.value)} rows={2} placeholder="Sudah dicek, kondisi aman / sudah diperbaiki, dsb." style={{ ...inputStyle, resize: "vertical", background: "#fff" }} />
+            </Field>
+            <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
+              <Btn variant="success" onClick={() => { onUpdateStatus(entry.id, "ditindaklanjuti", catatan.trim()); setShowTindakLanjut(false); }} style={{ padding: "7px 14px", fontSize: 12.5 }}>Tandai Selesai</Btn>
+              <Btn variant="ghost" onClick={() => setShowTindakLanjut(false)} style={{ padding: "7px 14px", fontSize: 12.5 }}>Batal</Btn>
+            </div>
+          </div>
+        ) : (
+          <Btn variant="ghost" onClick={() => setShowTindakLanjut(true)} style={{ marginTop: 10, padding: "6px 12px", fontSize: 12 }}>Tandai Ditindaklanjuti</Btn>
+        )
       )}
     </Card>
   );
 }
 
-function AbsensiForm({ namaAktif, onCancel, onSubmit }) {
+function LogKejadianForm({ onCancel, onSubmit }) {
   const [tanggal, setTanggal] = useState(todayISO());
-  const [shift, setShift] = useState("pagi");
-  const [kondisi, setKondisi] = useState("Aman Terkendali");
-  const [keterangan, setKeterangan] = useState("");
-  const [error, setError] = useState("");
+  const [jam, setJam] = useState(new Date().toTimeString().slice(0, 5));
+  const [kategori, setKategori] = useState(KATEGORI_KEJADIAN[0]);
+  const [deskripsi, setDeskripsi] = useState("");
 
   function handleSubmit(e) {
     e.preventDefault();
-    if (kondisi === "Ada Gangguan" && !keterangan.trim()) {
-      setError("Keterangan wajib diisi kalau ada kejadian, untuk dokumentasi.");
-      return;
-    }
-    onSubmit({ tanggal, shift, kondisi, keterangan: keterangan.trim() });
+    if (!deskripsi.trim()) return;
+    onSubmit({ tanggal, jam, kategori, deskripsi: deskripsi.trim() });
   }
 
   return (
-    <FormShell title="Isi Laporan Jaga" onCancel={onCancel} onSubmit={handleSubmit}>
-      <div style={{ marginBottom: 12 }}>
-        <div style={{ fontSize: 13, color: COLORS.inkSoft, fontWeight: 600, marginBottom: 5 }}>Petugas</div>
-        <div style={{ padding: "9px 11px", borderRadius: 7, background: COLORS.bg, fontWeight: 600 }}>{namaAktif}</div>
-      </div>
+    <FormShell title="Laporkan Kejadian" onCancel={onCancel} onSubmit={handleSubmit}>
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 12 }}>
         <Field label="Tanggal"><input type="date" value={tanggal} max={todayISO()} onChange={(e) => setTanggal(e.target.value)} style={inputStyle} /></Field>
-        <Field label="Shift">
-          <select value={shift} onChange={(e) => setShift(e.target.value)} style={inputStyle}>
-            <option value="pagi">Pagi</option>
-            <option value="malam">Malam</option>
+        <Field label="Jam"><input type="time" value={jam} onChange={(e) => setJam(e.target.value)} style={inputStyle} /></Field>
+      </div>
+      <div style={{ marginBottom: 12 }}>
+        <Field label="Kategori">
+          <select value={kategori} onChange={(e) => setKategori(e.target.value)} style={inputStyle}>
+            {KATEGORI_KEJADIAN.map((k) => <option key={k} value={k}>{k}</option>)}
           </select>
         </Field>
       </div>
-      <div style={{ marginBottom: 12 }}>
-        <div style={{ fontSize: 13, color: COLORS.inkSoft, fontWeight: 600, marginBottom: 6 }}>Kondisi Selama Jaga</div>
-        <div style={{ display: "flex", gap: 8 }}>
-          {KONDISI_ABSENSI.map((k) => {
-            const active = kondisi === k;
-            const warna = k === "Ada Gangguan" ? COLORS.danger : COLORS.success;
-            const warnaSoft = k === "Ada Gangguan" ? COLORS.dangerSoft : COLORS.successSoft;
-            return (
-              <button key={k} type="button" onClick={() => setKondisi(k)} style={{
-                flex: 1, padding: "10px 8px", borderRadius: 8, cursor: "pointer", fontSize: 13, fontWeight: 600,
-                border: `1.5px solid ${active ? warna : COLORS.divider}`,
-                background: active ? warnaSoft : "#fff",
-                color: active ? warna : COLORS.inkSoft,
-              }}>{k}</button>
-            );
-          })}
-        </div>
-      </div>
       <div style={{ marginBottom: 16 }}>
-        <Field label={`Keterangan ${kondisi === "Ada Gangguan" ? "(wajib diisi)" : "(opsional)"}`}>
-          <textarea value={keterangan} onChange={(e) => setKeterangan(e.target.value)} rows={4} placeholder="Ceritakan kejadiannya, misal: kemalingan, keributan warga, kebakaran, atau hal lain yang mengganggu keamanan & ketertiban" style={{ ...inputStyle, resize: "vertical" }} />
+        <Field label="Deskripsi Kejadian">
+          <textarea value={deskripsi} onChange={(e) => setDeskripsi(e.target.value)} rows={4} placeholder="Ceritakan kejadiannya selengkap mungkin, biar mudah ditindaklanjuti" style={{ ...inputStyle, resize: "vertical" }} />
         </Field>
       </div>
-      {error && <div style={{ fontSize: 12.5, color: COLORS.danger, background: COLORS.dangerSoft, padding: "8px 10px", borderRadius: 6, marginBottom: 12 }}>{error}</div>}
-      <Btn type="submit">Simpan Laporan</Btn>
+      <Btn type="submit">Kirim Laporan</Btn>
     </FormShell>
   );
 }
 
-function AbsensiSecurityView({ absensiSecurity, role, namaAktif, onSubmit }) {
-  const [selectedIso, setSelectedIso] = useState(null);
-  const [showForm, setShowForm] = useState(false);
-  const grid = useMemo(() => buildCalendarGrid(30), []);
+function DistribusiKategoriMini({ data, activeKategori, onSelectKategori }) {
+  const maxJumlah = Math.max(...data.map((d) => d.jumlah), 1);
+  const top = data.slice(0, 5);
+  if (data.length === 0) return <div style={{ fontSize: 12.5, color: COLORS.inkFaint, padding: "6px 0" }}>Tidak ada kejadian tercatat.</div>;
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+      {top.map((d, i) => {
+        const active = activeKategori === d.kategori;
+        return (
+          <button
+            key={d.kategori}
+            onClick={() => onSelectKategori(active ? null : d.kategori)}
+            style={{
+              display: "block", width: "100%", textAlign: "left", background: active ? "rgba(228,113,30,0.16)" : "transparent",
+              border: active ? "1.5px solid rgba(228,113,30,0.4)" : "1.5px solid transparent", borderRadius: 8, padding: "6px 8px", margin: "0 -8px", cursor: "pointer",
+            }}
+          >
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", fontSize: 12.5, marginBottom: 4 }}>
+              <span style={{ color: active ? COLORS.accentDeep : COLORS.ink, fontWeight: active || i === 0 ? 700 : 500 }}>{d.kategori}</span>
+              <span className="mono" style={{ fontWeight: 700, color: COLORS.accent, flexShrink: 0, marginLeft: 8 }}>{d.jumlah}</span>
+            </div>
+            <div style={{ height: 6, background: COLORS.bg, borderRadius: 3 }}>
+              <div style={{ height: "100%", width: `${(d.jumlah / maxJumlah) * 100}%`, background: COLORS.accent, borderRadius: 3 }} />
+            </div>
+          </button>
+        );
+      })}
+      {data.length > 5 && <div style={{ fontSize: 11, color: COLORS.inkFaint, padding: "2px 8px" }}>+{data.length - 5} kategori lainnya</div>}
+      <div style={{ fontSize: 10.5, color: COLORS.inkFaint, padding: "4px 8px 0" }}>Ketuk salah satu kategori untuk memfilter daftar di bawah.</div>
+    </div>
+  );
+}
 
-  function findEntry(iso, shift) {
-    return absensiSecurity.find((a) => a.tanggal === iso && a.shift === shift) || null;
+function LogKejadianView({ logKejadian, role, onAddLogKejadian, onUpdateStatusLogKejadian }) {
+  const [showLogForm, setShowLogForm] = useState(false);
+  const [viewScope, setViewScope] = useState("30hari");
+  const [filterStatus, setFilterStatus] = useState(null); // null | "baru" | "ditindaklanjuti"
+  const [filterKategori, setFilterKategori] = useState(null);
+  const canTindakLanjut = role === "pengurus" || role === "security";
+
+  const cutoff30 = useMemo(() => {
+    const d = new Date();
+    d.setDate(d.getDate() - 29);
+    return toLocalISODate(d);
+  }, []);
+  const data30Hari = useMemo(() => logKejadian.filter((l) => l.tanggal >= cutoff30), [logKejadian, cutoff30]);
+
+  const distribusiKategori = useMemo(() => {
+    const map = {};
+    data30Hari.forEach((l) => { map[l.kategori] = (map[l.kategori] || 0) + 1; });
+    return Object.entries(map).map(([kategori, jumlah]) => ({ kategori, jumlah })).sort((a, b) => b.jumlah - a.jumlah);
+  }, [data30Hari]);
+  const jumlahBaru30 = data30Hari.filter((l) => l.status === "baru").length;
+  const jumlahSelesai30 = data30Hari.filter((l) => l.status === "ditindaklanjuti").length;
+
+  const dataSesuaiScope = viewScope === "30hari" ? data30Hari : logKejadian;
+  let daftarTampil = dataSesuaiScope;
+  if (filterStatus) daftarTampil = daftarTampil.filter((l) => l.status === filterStatus);
+  if (filterKategori) daftarTampil = daftarTampil.filter((l) => l.kategori === filterKategori);
+
+  function toggleFilterStatus(status) {
+    setFilterStatus((prev) => (prev === status ? null : status));
   }
-
-  const recentIsoDesc = useMemo(() => {
-    return grid.filter((c) => c.inRange).sort((a, b) => a.dayOffset - b.dayOffset).slice(0, 5).map((c) => c.iso);
-  }, [grid]);
-
-  const isoListToShow = selectedIso ? [selectedIso] : recentIsoDesc;
 
   return (
     <>
       <SectionTitle
-        title="Absensi Security"
-        subtitle="Laporan kondisi jaga, 1x per shift"
+        title="Log Kejadian"
+        subtitle="Dokumentasi kejadian yang mengganggu keamanan & ketertiban"
       />
 
-      {showForm && (
+      {showLogForm && (
         <div style={{ position: "fixed", inset: 0, background: "rgba(29,29,31,0.5)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 80, padding: 16 }}>
           <div style={{ width: "100%", maxWidth: 420, maxHeight: "88vh", overflowY: "auto" }}>
-            <AbsensiForm namaAktif={namaAktif} onCancel={() => setShowForm(false)} onSubmit={(data) => { onSubmit(data); setShowForm(false); }} />
+            <LogKejadianForm onCancel={() => setShowLogForm(false)} onSubmit={(data) => { onAddLogKejadian(data); setShowLogForm(false); }} />
           </div>
         </div>
       )}
 
-      <div style={{ display: "flex", flexWrap: "wrap", gap: 14, marginBottom: 14, fontSize: 12, color: COLORS.inkSoft }}>
-        <span style={{ display: "flex", alignItems: "center", gap: 5 }}><span style={{ width: 10, height: 10, borderRadius: 3, background: COLORS.success }} />Aman</span>
-        <span style={{ display: "flex", alignItems: "center", gap: 5 }}><span style={{ width: 10, height: 10, borderRadius: 3, background: COLORS.danger }} />Ada Gangguan</span>
-        <span style={{ display: "flex", alignItems: "center", gap: 5 }}><span style={{ width: 10, height: 10, borderRadius: 3, background: COLORS.inkFaint }} />Belum Lapor</span>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8, gap: 8 }}>
+        <div style={{ fontSize: 11, fontWeight: 700, color: COLORS.inkFaint, textTransform: "uppercase", letterSpacing: "0.04em" }}>Statistik 30 Hari Terakhir</div>
+        {filterStatus && <span style={{ fontSize: 10.5, color: COLORS.inkFaint }}>Ketuk lagi kartunya untuk lepas filter</span>}
+      </div>
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 14 }}>
+        <KpiCard
+          icon={CheckCircle2} iconBg={COLORS.successSoft} iconColor={COLORS.success}
+          label="Sudah Ditindaklanjuti" value={jumlahSelesai30} valueColor={COLORS.success}
+          onClick={() => toggleFilterStatus("ditindaklanjuti")} active={filterStatus === "ditindaklanjuti"}
+          activeBg="rgba(76,138,71,0.16)"
+        />
+        <KpiCard
+          icon={Clock} iconBg={COLORS.warningSoft} iconColor={COLORS.warning}
+          label="Belum Ditindaklanjuti" value={jumlahBaru30} valueColor={jumlahBaru30 > 0 ? COLORS.warning : COLORS.ink}
+          onClick={() => toggleFilterStatus("baru")} active={filterStatus === "baru"}
+          activeBg="rgba(201,138,27,0.18)"
+        />
       </div>
 
-      <Card style={{ padding: 16, marginBottom: 20 }}>
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(7,1fr)", gap: 4, marginBottom: 6 }}>
-          {["Min", "Sen", "Sel", "Rab", "Kam", "Jum", "Sab"].map((h) => (
-            <div key={h} style={{ textAlign: "center", fontSize: 10.5, color: COLORS.inkFaint }}>{h}</div>
-          ))}
-        </div>
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(7,1fr)", gap: 4 }}>
-          {grid.map((cell, i) => {
-            if (!cell.inRange) return <div key={i} />;
-            const isSelected = cell.iso === selectedIso;
-            return (
-              <button
-                key={i}
-                onClick={() => setSelectedIso(isSelected ? null : cell.iso)}
-                style={{
-                  aspectRatio: "1", borderRadius: 8, cursor: "pointer", padding: 3,
-                  display: "flex", flexDirection: "column", justifyContent: "space-between",
-                  border: isSelected ? `2px solid ${COLORS.accent}` : cell.isToday ? `1.5px solid ${COLORS.ink}` : `1px solid ${COLORS.divider}`,
-                  background: isSelected ? COLORS.accentSoft : "#fff",
-                }}
-              >
-                <div style={{ fontSize: 10, color: COLORS.inkFaint, textAlign: "right" }}>{cell.tanggalNum}</div>
-                <div style={{ display: "flex", gap: 2 }}>
-                  <StripStatus entry={findEntry(cell.iso, "pagi")} />
-                  <StripStatus entry={findEntry(cell.iso, "malam")} />
-                </div>
-              </button>
-            );
-          })}
+      <Card style={{ marginBottom: 22 }}>
+        <div style={{ padding: "14px 16px", borderBottom: `1px solid ${COLORS.divider}`, fontWeight: 700, fontSize: 14.5 }}>Kejadian Paling Sering Dilaporkan</div>
+        <div style={{ padding: 16 }}>
+          <DistribusiKategoriMini data={distribusiKategori} activeKategori={filterKategori} onSelectKategori={setFilterKategori} />
         </div>
       </Card>
 
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12, flexWrap: "wrap", gap: 8 }}>
-        <div style={{ fontWeight: 700, fontSize: 15.5 }}>{selectedIso ? dayLabelShort(selectedIso) : "Laporan Terbaru"}</div>
-        {selectedIso && <Btn variant="ghost" onClick={() => setSelectedIso(null)} style={{ padding: "6px 12px", fontSize: 12 }}>Tampilkan Semua</Btn>}
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12, flexWrap: "wrap", gap: 10 }}>
+        <div style={{ fontWeight: 700, fontSize: 15.5 }}>Daftar Kejadian</div>
+        <SegmentedControl
+          value={viewScope}
+          onChange={setViewScope}
+          options={[
+            { value: "30hari", label: "30 Hari" },
+            { value: "semua", label: "Semua Riwayat" },
+          ]}
+        />
       </div>
 
-      <div style={{ paddingBottom: role === "security" ? 90 : 0 }}>
-        {isoListToShow.map((iso) => (
-          <React.Fragment key={iso}>
-            <AbsensiCard iso={iso} shift="malam" entry={findEntry(iso, "malam")} />
-            <AbsensiCard iso={iso} shift="pagi" entry={findEntry(iso, "pagi")} />
-          </React.Fragment>
+      {filterKategori && (
+        <div style={{ marginBottom: 14 }}>
+          <button
+            onClick={() => setFilterKategori(null)}
+            style={{
+              display: "inline-flex", alignItems: "center", gap: 6, padding: "7px 13px", borderRadius: 999, cursor: "pointer",
+              border: `1.5px solid ${COLORS.accent}`, background: "rgba(228,113,30,0.16)", color: COLORS.accentDeep,
+              fontSize: 12.5, fontWeight: 600,
+            }}
+          >
+            Kategori: {filterKategori}
+            <X size={13} style={{ marginLeft: 2 }} />
+          </button>
+        </div>
+      )}
+
+      <div style={{ paddingBottom: 90 }}>
+        {daftarTampil.length === 0 && <div style={{ fontSize: 13, color: COLORS.inkSoft, padding: "16px 0", textAlign: "center" }}>{filterStatus === "baru" ? "Tidak ada kejadian yang belum ditindaklanjuti." : "Belum ada kejadian tercatat."}</div>}
+        {daftarTampil.map((entry) => (
+          <LogKejadianCard key={entry.id} entry={entry} canTindakLanjut={canTindakLanjut} onUpdateStatus={onUpdateStatusLogKejadian} />
         ))}
       </div>
 
-      {role === "security" && (
-        <div className="fab-btn">
-          <Btn pill onClick={() => setShowForm(true)} style={{ boxShadow: "0 10px 24px rgba(228,113,30,0.35)", fontSize: 15, padding: "13px 22px" }}>
-            <ClipboardCheck size={16} /> Isi Laporan Jaga
-          </Btn>
-        </div>
-      )}
+      <div className="fab-btn">
+        <Btn pill onClick={() => setShowLogForm(true)} style={{ boxShadow: "0 10px 24px rgba(228,113,30,0.35)", fontSize: 15, padding: "13px 22px" }}>
+          <AlertTriangle size={16} /> Laporkan Kejadian
+        </Btn>
+      </div>
     </>
   );
 }
