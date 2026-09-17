@@ -659,33 +659,61 @@ function TrenSaldoChart({ data }) {
           );
         })}
         <path d={pathD} fill="none" stroke={COLORS.accent} strokeWidth="2.5" strokeLinejoin="round" strokeLinecap="round" />
-        {points.map((p, i) => (
-          <g key={i} onClick={() => setAktif(i)} style={{ cursor: "pointer" }}>
-            <circle cx={p.x} cy={p.y} r="10" fill="transparent" />
-            <circle cx={p.x} cy={p.y} r={i === aktif ? 5.5 : 3.5} fill={i === aktif ? COLORS.accentDeep : COLORS.accent} stroke={i === aktif ? "#fff" : "none"} strokeWidth="1.5" />
-            <text x={p.x} y={height - 8} textAnchor={i === 0 ? "start" : i === points.length - 1 ? "end" : "middle"} fontSize="10.5" fill={COLORS.inkSoft} fontFamily="monospace">{monthLabelShort(p.bulan)}</text>
-          </g>
-        ))}
+        {points.map((p, i) => {
+          const showLabel = data.length <= 7 || i % 2 === 0 || i === points.length - 1;
+          return (
+            <g key={i} onClick={() => setAktif(i)} style={{ cursor: "pointer" }}>
+              <circle cx={p.x} cy={p.y} r="9" fill="transparent" />
+              <circle cx={p.x} cy={p.y} r={i === aktif ? 5.5 : 3} fill={i === aktif ? COLORS.accentDeep : COLORS.accent} stroke={i === aktif ? "#fff" : "none"} strokeWidth="1.5" />
+              {showLabel && <text x={p.x} y={height - 8} textAnchor={i === 0 ? "start" : i === points.length - 1 ? "end" : "middle"} fontSize="10" fill={COLORS.inkSoft} fontFamily="monospace">{monthLabelShort(p.bulan)}</text>}
+            </g>
+          );
+        })}
       </svg>
     </div>
   );
 }
 
 function MasukKeluarChart({ data }) {
+  const width = 600, height = 190, padTop = 14, padBottom = 26, padLeft = 46, padRight = 10;
   const maxV = Math.max(...data.flatMap((d) => [d.masuk, d.keluar]), 1);
+  const niceMax = Math.max(4000000, Math.ceil(maxV / 4000000) * 4000000);
+  const ticks = [0, niceMax * 0.25, niceMax * 0.5, niceMax * 0.75, niceMax];
+  const innerW = width - padLeft - padRight;
+  const innerH = height - padTop - padBottom;
+  const n = data.length;
+  const groupW = innerW / n;
+  const barW = Math.min(11, groupW * 0.32);
+  const yFor = (v) => padTop + (1 - v / niceMax) * innerH;
+  const formatJt = (v) => v === 0 ? "0" : `${Math.round(v / 1000000)}jt`;
+  const rapat = n > 8;
+
   return (
     <div>
-      <div style={{ display: "flex", alignItems: "flex-end", gap: 10, height: 150, padding: "6px 4px 0" }}>
-        {data.map((d) => (
-          <div key={d.bulan} style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", height: "100%", justifyContent: "flex-end", gap: 6 }}>
-            <div style={{ display: "flex", alignItems: "flex-end", gap: 3, height: "100%" }}>
-              <div style={{ width: 9, height: `${Math.max(2, (d.masuk / maxV) * 100)}%`, background: COLORS.success, borderRadius: "3px 3px 0 0" }} />
-              <div style={{ width: 9, height: `${Math.max(2, (d.keluar / maxV) * 100)}%`, background: COLORS.danger, borderRadius: "3px 3px 0 0" }} />
-            </div>
-            <div style={{ fontSize: 10, color: COLORS.inkSoft, fontFamily: "monospace" }}>{monthLabelShort(d.bulan)}</div>
-          </div>
-        ))}
-      </div>
+      <svg viewBox={`0 0 ${width} ${height}`} style={{ width: "100%", height: "auto", display: "block" }}>
+        {ticks.map((t, i) => {
+          const y = yFor(t);
+          return (
+            <g key={i}>
+              <line x1={padLeft} y1={y} x2={width - padRight} y2={y} stroke={COLORS.divider} strokeWidth="1" />
+              <text x={padLeft - 8} y={y + 3.5} textAnchor="end" fontSize="10.5" fill={COLORS.inkSoft} fontFamily="monospace">{formatJt(t)}</text>
+            </g>
+          );
+        })}
+        {data.map((d, i) => {
+          const cx = padLeft + groupW * i + groupW / 2;
+          const showLabel = !rapat || i % 2 === 0 || i === n - 1;
+          const hMasuk = (d.masuk / niceMax) * innerH;
+          const hKeluar = (d.keluar / niceMax) * innerH;
+          return (
+            <g key={d.bulan}>
+              <rect x={cx - barW - 1.5} y={padTop + innerH - hMasuk} width={barW} height={Math.max(0, hMasuk)} fill={COLORS.success} rx="2" />
+              <rect x={cx + 1.5} y={padTop + innerH - hKeluar} width={barW} height={Math.max(0, hKeluar)} fill={COLORS.danger} rx="2" />
+              {showLabel && <text x={cx} y={height - 8} textAnchor="middle" fontSize={rapat ? 9 : 10} fill={COLORS.inkSoft} fontFamily="monospace">{monthLabelShort(d.bulan)}</text>}
+            </g>
+          );
+        })}
+      </svg>
       <div style={{ display: "flex", gap: 16, justifyContent: "center", marginTop: 10, fontSize: 11.5, color: COLORS.inkSoft }}>
         <span style={{ display: "flex", alignItems: "center", gap: 5 }}><span style={{ width: 10, height: 10, borderRadius: 2, background: COLORS.success }} />Masuk</span>
         <span style={{ display: "flex", alignItems: "center", gap: 5 }}><span style={{ width: 10, height: 10, borderRadius: 2, background: COLORS.danger }} />Keluar</span>
@@ -1456,9 +1484,9 @@ export default function SBTPintar() {
   }), [warga]);
   const menunggakCount = useMemo(() => arrearsStreakByWarga.filter((s) => s >= 2).length, [arrearsStreakByWarga]);
 
-  // tren saldo kas 6 bulan terakhir (akhir tiap bulan)
+  // tren saldo kas 12 bulan terakhir (akhir tiap bulan)
   const trenSaldoBulanan = useMemo(() => {
-    const bulanList = months12Asc.slice(-6);
+    const bulanList = months12Asc;
     return bulanList.map((mk) => {
       const totalSampaiBulanIni = transaksi
         .filter((t) => monthKeyOf(t.tanggal) <= mk)
@@ -1467,9 +1495,9 @@ export default function SBTPintar() {
     });
   }, [transaksi]);
 
-  // pemasukan vs pengeluaran per bulan, 6 bulan terakhir
+  // pemasukan vs pengeluaran per bulan, 12 bulan terakhir
   const masukKeluarBulanan = useMemo(() => {
-    const bulanList = months12Asc.slice(-6);
+    const bulanList = months12Asc;
     return bulanList.map((mk) => ({
       bulan: mk,
       masuk: transaksi.filter((t) => t.tipe === "masuk" && monthKeyOf(t.tanggal) === mk).reduce((s, t) => s + t.jumlah, 0),
