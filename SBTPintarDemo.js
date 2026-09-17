@@ -523,7 +523,7 @@ const COLORS = {
 // ============================================================
 // storage
 // ============================================================
-const KEYS = { warga: "sbt:warga:v5", transaksi: "sbt:transaksi:v3", kegiatan: "sbt:kegiatan:v3", pengguna: "sbt:pengguna:v7", absensi: "sbt:absensi:v1", jabatanOptions: "sbt:jabatanoptions:v1", kontakDarurat: "sbt:kontakdarurat:v2", perangkatDesa: "sbt:perangkatdesa:v2", posAnggaran: "sbt:posanggaran:v1", thrConfig: "sbt:thrconfig:v1" };
+const KEYS = { warga: "sbt:warga:v6", transaksi: "sbt:transaksi:v4", kegiatan: "sbt:kegiatan:v3", pengguna: "sbt:pengguna:v7", absensi: "sbt:absensi:v1", jabatanOptions: "sbt:jabatanoptions:v1", kontakDarurat: "sbt:kontakdarurat:v2", perangkatDesa: "sbt:perangkatdesa:v2", posAnggaran: "sbt:posanggaran:v1", thrConfig: "sbt:thrconfig:v1" };
 async function loadKey(key, fallback) {
   try {
     if (typeof window !== "undefined" && window.storage) {
