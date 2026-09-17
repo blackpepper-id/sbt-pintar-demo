@@ -1530,6 +1530,32 @@ export default function SBTPintar() {
   const totalPagu = useMemo(() => flattenPos(posAnggaran).reduce((s, p) => s + p.pagu, 0), [posAnggaran]);
   const totalRealisasi = useMemo(() => budgetGrup.reduce((s, g) => s + g.pos.reduce((s2, p) => s2 + p.realisasi, 0), 0), [budgetGrup]);
 
+  // target pemasukan tahunan — proyeksi penuh 1 tahun ikut status/tarif tiap
+  // rumah saat ini (bulan yang belum lewat dianggap tetap sama seperti sekarang)
+  const tahunLalu = tahunBerjalan - 1;
+  const semuaBulanTahunIni = useMemo(() => Array.from({ length: 12 }, (_, i) => `${tahunBerjalan}-${pad2(i + 1)}`), [tahunBerjalan]);
+  const targetIPLTahunan = useMemo(() => semuaBulanTahunIni.reduce((sum, mk) => sum + warga.reduce((s, w) => {
+    const t = getTagihanBulan(w, mk);
+    return s + (t.status === "aktif" ? t.tarif : 0);
+  }, 0), 0), [warga, semuaBulanTahunIni]);
+  const realisasiIPLTahunIni = useMemo(() => transaksi.filter((t) => t.tipe === "masuk" && t.kategori === "Pembayaran IPL" && t.tanggal.slice(0, 4) === String(tahunBerjalan)).reduce((s, t) => s + t.jumlah, 0), [transaksi, tahunBerjalan]);
+
+  // tunggakan tahun lalu — dalam batas data yang terlacak (12 bulan terakhir)
+  const bulanTahunLaluTerlacak = useMemo(() => months12Asc.filter((mk) => mk.startsWith(String(tahunLalu))), [tahunLalu]);
+  const targetTunggakanTahunLalu = useMemo(() => bulanTahunLaluTerlacak.reduce((sum, mk) => sum + warga.reduce((s, w) => {
+    const t = getTagihanBulan(w, mk);
+    return s + (t.status === "aktif" ? t.tarif : 0);
+  }, 0), 0), [warga, bulanTahunLaluTerlacak]);
+  const realisasiTunggakanTahunLalu = useMemo(() => transaksi.filter((t) => t.tipe === "masuk" && t.kategori === "Pembayaran IPL" && t.monthKey && t.monthKey.startsWith(String(tahunLalu))).reduce((s, t) => s + t.jumlah, 0), [transaksi, tahunLalu]);
+
+  // saldo akhir tahun lalu (posisi kas per 31 Desember tahun lalu)
+  const saldoAkhirTahunLalu = useMemo(() => {
+    const akhir = `${tahunLalu}-12`;
+    const total = transaksi.filter((t) => monthKeyOf(t.tanggal) <= akhir).reduce((s, t) => s + (t.tipe === "masuk" ? t.jumlah : -t.jumlah), 0);
+    return SALDO_AWAL_KAS + total;
+  }, [transaksi, tahunLalu]);
+  const totalTargetPemasukan = targetIPLTahunan + targetTunggakanTahunLalu;
+  const totalRealisasiPemasukan = realisasiIPLTahunIni + realisasiTunggakanTahunLalu;
 
   const laporanTx = useMemo(() => transaksi.filter((t) => monthKeyOf(t.tanggal) === laporanBulan), [transaksi, laporanBulan]);
   const laporanMasuk = laporanTx.filter((t) => t.tipe === "masuk").reduce((s, t) => s + t.jumlah, 0);
@@ -1725,6 +1751,38 @@ export default function SBTPintar() {
                   <div style={{ padding: "8px 16px 4px" }}><MasukKeluarChart data={masukKeluarBulanan} /></div>
                 </Card>
               </div>
+
+              <Card style={{ marginTop: 16 }}>
+                <div style={{ padding: "16px 20px", borderBottom: `1px solid ${COLORS.divider}` }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+                    <div style={{ fontWeight: 700, fontSize: 15.5 }}>Target Pemasukan &amp; Realisasi {tahunBerjalan}</div>
+                    <div className="mono" style={{ fontSize: 12.5, color: totalRealisasiPemasukan >= totalTargetPemasukan ? COLORS.success : COLORS.inkSoft }}>{formatRp(totalRealisasiPemasukan)} / {formatRp(totalTargetPemasukan)}</div>
+                  </div>
+                </div>
+                <div style={{ padding: 18, display: "flex", flexDirection: "column", gap: 18 }}>
+                  <PemasukanBreakdownItem
+                    label="Iuran IPL Warga"
+                    value={realisasiIPLTahunIni}
+                    target={targetIPLTahunan}
+                    color={COLORS.accent}
+                    note="total tahun berjalan vs target 1 tahun"
+                  />
+                  <PemasukanBreakdownItem
+                    label={`Pembayaran Tunggakan ${tahunLalu}`}
+                    value={realisasiTunggakanTahunLalu}
+                    target={targetTunggakanTahunLalu > 0 ? targetTunggakanTahunLalu : null}
+                    color={COLORS.warning}
+                    note={`dari tunggakan ${tahunLalu} yang terlacak`}
+                  />
+                  <PemasukanBreakdownItem
+                    label={`Saldo Akhir ${tahunLalu}`}
+                    value={saldoAkhirTahunLalu}
+                    target={null}
+                    color={COLORS.sageDeep}
+                    note="posisi kas per 31 Desember tahun lalu"
+                  />
+                </div>
+              </Card>
 
               <Card style={{ marginTop: 16 }}>
                 <div style={{ padding: "16px 20px", borderBottom: `1px solid ${COLORS.divider}` }}>
