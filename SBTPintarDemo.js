@@ -5,7 +5,7 @@ import {
   LayoutDashboard, Wallet, CalendarDays, FileText, Siren,
   Phone, MessageCircle, Plus, X, Printer, ShieldCheck, Upload,
   UserCog, CheckCircle2, Clock, AlertTriangle, XCircle, Send, ImageIcon, Pencil, ClipboardCheck, Info, Trash2, MoreVertical, KeyRound,
-  TrendingUp, TrendingDown, Users, ChevronDown, PieChart as PieChartIcon,
+  TrendingUp, TrendingDown, Users, ChevronDown, PieChart as PieChartIcon, Settings, Ban,
 } from "lucide-react";
 
 // ============================================================
@@ -128,31 +128,102 @@ const canKelolaAkses = (role) => role === "pengurus";
 const canCatatKeuangan = (role) => role === "pengurus";
 
 // ============================================================
-// struktur kategori transaksi
+// Pos Anggaran — SATU sumber untuk kategori transaksi SEKALIGUS budget
+// tahunan. Tiap Pos = kategori transaksi (dipilih langsung saat catat
+// pengeluaran) + pagu tahunan (bisa diedit pengurus) + daftar sub-kategori.
+// Realisasi = total transaksi keluar tahun berjalan dengan kategori =
+// nama pos itu — tidak ada lagi aturan pencocokan terpisah yang bisa
+// "putus" kalau nama diubah, karena rename pos otomatis migrasi transaksi.
 // ============================================================
-const KATEGORI_PENGELUARAN = {
-  "Keamanan": ["Pembayaran Gaji Security", "Pembayaran Insentif Bhabinkamtibmas", "Pembayaran Insentif Bhabinsa", "Kasbon Security", "Pengadaan Barang/Jasa"],
-  "Kebersihan": ["Jasa Pengambilan Sampah"],
-  "Tagihan": ["Tagihan PDAM", "Tagihan Listrik", "Tagihan Internet"],
-  "Kegiatan": ["Rapat Pengurus", "Pertemuan Warga", "Kerja Bakti", "Pelaksanaan Qurban", "17 Agustusan", "Tahun Baru", "Buka Bersama", "Halal Bihalal", "Kegiatan Lainnya"],
-  "Iuran RT": ["Iuran Dana Kematian"],
-  "Lain-lain": ["Lain-lain"],
-};
-const KATEGORI_PENGELUARAN_LIST = Object.keys(KATEGORI_PENGELUARAN);
-// beban operasional = pengeluaran rutin wajib tiap bulan (gaji security,
-// sampah, tagihan) — beda sifatnya dari pengeluaran situasional (kegiatan,
-// iuran RT, lain-lain) yang tidak selalu ada tiap bulan
-const KATEGORI_OPERASIONAL = ["Keamanan", "Kebersihan", "Tagihan"];
+const POS_ANGGARAN_DEFAULT = [
+  {
+    grup: "Operasional",
+    pos: [
+      { id: "pos1", nama: "Gaji Security", pagu: 1650000 * 3 * 12, sub: ["Pembayaran Gaji Security", "Kasbon Security"], catatan: "termasuk kasbon security" },
+      { id: "pos2", nama: "Kopi/Gula/Gas LPG", pagu: 250000 * 12, sub: ["Kopi/Gula/Gas LPG"] },
+      { id: "pos3", nama: "Insentif Babinsa/Bhabinkamtibmas", pagu: 200000 * 12, sub: ["Insentif Bhabinkamtibmas", "Insentif Bhabinsa"] },
+      { id: "pos4", nama: "Tagihan Bulanan", pagu: 50000 * 12, sub: ["Tagihan PDAM", "Tagihan Listrik", "Tagihan Internet"] },
+      { id: "pos5", nama: "Jasa Pengambilan Sampah", pagu: 500000 * 12, sub: ["Jasa Pengambilan Sampah"] },
+    ],
+  },
+  { grup: "Subsidi THR", pos: [{ id: "pos6", nama: "Subsidi THR", pagu: 1500000, sub: ["Subsidi THR"] }] },
+  { grup: "Iuran RT", pos: [{ id: "pos7", nama: "Iuran RT / Dana Kematian", pagu: 5000 * 35 * 12, sub: ["Iuran Dana Kematian"] }] },
+  {
+    grup: "Kegiatan warga",
+    pos: [
+      { id: "pos8", nama: "Kegiatan Warga (Umum)", pagu: 5000000, sub: ["Rapat Pengurus", "Pertemuan Warga", "Kerja Bakti", "Pelaksanaan Qurban", "17 Agustusan", "Tahun Baru", "Buka Bersama", "Halal Bihalal", "Kegiatan Lainnya"] },
+      { id: "pos9", nama: "Kegiatan Bapak-bapak", pagu: 500000, sub: ["Kegiatan Bapak-bapak"] },
+      { id: "pos10", nama: "Kegiatan Ibu-ibu", pagu: 500000, sub: ["Kegiatan Ibu-ibu"] },
+      { id: "pos11", nama: "Kegiatan Anak-anak", pagu: 500000, sub: ["Kegiatan Anak-anak"] },
+    ],
+  },
+  { grup: "Pengadaan barang / jasa", pos: [{ id: "pos12", nama: "Pengadaan Barang/Jasa", pagu: 500000, sub: ["Pengadaan Barang/Jasa"] }] },
+  { grup: "Bantuan sosial", pos: [{ id: "pos13", nama: "Bantuan Sosial", pagu: 1000000, sub: ["Bantuan Sosial"] }] },
+];
+// Kategori di luar budget — tidak dilacak pagu, selalu tersedia di dropdown
+const KATEGORI_TANPA_BUDGET = "Lain-lain";
+const SUB_TANPA_BUDGET = ["Lain-lain"];
+
+function flattenPos(posAnggaran) {
+  return posAnggaran.flatMap((g) => g.pos.map((p) => ({ ...p, grup: g.grup })));
+}
+function getKategoriList(posAnggaran) {
+  return [...flattenPos(posAnggaran).map((p) => p.nama), KATEGORI_TANPA_BUDGET];
+}
+function getSubUntukKategori(posAnggaran, kategoriNama) {
+  const pos = flattenPos(posAnggaran).find((p) => p.nama === kategoriNama);
+  return pos ? pos.sub : SUB_TANPA_BUDGET;
+}
+function hitungRealisasiPos(posNama, transaksi, tahun) {
+  return transaksi
+    .filter((t) => t.tipe === "keluar" && t.kategori === posNama && t.tanggal.slice(0, 4) === String(tahun))
+    .reduce((s, t) => s + t.jumlah, 0);
+}
+// beban operasional = pengeluaran rutin wajib tiap bulan — dipakai untuk
+// kartu Cadangan Kas di Ringkasan
+function getKategoriOperasional(posAnggaran) {
+  const grupOperasional = posAnggaran.find((g) => g.grup === "Operasional");
+  return grupOperasional ? grupOperasional.pos.map((p) => p.nama) : [];
+}
+
 // pemasukan di luar IPL (yang otomatis dari verifikasi pembayaran) — dicatat manual oleh pengurus
-const KATEGORI_PEMASUKAN_MANUAL = ["Iuran THR", "Lain-lain"];
+// (catatan pemasukan sekarang otomatis — Pembayaran IPL & Iuran THR
+// dihasilkan sistem lewat verifikasi, tidak perlu input manual lagi)
+// Periode Iuran THR — sukarela, 1x/tahun, bergeser ikut kalender Lebaran.
+// Pengurus atur bulan & tahun-nya tiap tahun lewat menu Setting.
+const THR_CONFIG_DEFAULT = { tahun: "2026", bulan: "2026-03", aktif: true };
 
 // ============================================================
 // seed data
 // ============================================================
 const SALDO_AWAL_KAS = 6800000;
 const IPL_PER_BULAN = 200000;
+const IPL_DISKON = 100000;
 const REKENING_IPL = { bank: "Bank BCA", nomor: "1234567890", atasNama: "Bendahara" };
 const BUKTI_CONTOH = "https://images.unsplash.com/photo-1554224155-6726b3ff858f?w=200&q=60";
+
+// Status IPL per rumah berbasis RIWAYAT PERIODE, bukan 1 angka tetap —
+// karena bisa berubah dari waktu ke waktu (pindah huni, disita bank,
+// dijual lagi, dst). riwayatIPL = daftar periode terurut kronologis:
+//   { dari: "2026-01", sampai: "2026-05" atau null (masih berlaku), status: "aktif"/"nonaktif", tarif }
+// Kalau rumah tidak punya riwayatIPL sama sekali (data lama), dianggap
+// 1 periode aktif-normal terbuka dari awal — supaya tidak ada yang "hilang"
+// tagihannya begitu saja saat fitur ini ditambahkan.
+function getTagihanBulan(w, monthKey) {
+  const riwayat = w.riwayatIPL && w.riwayatIPL.length > 0
+    ? w.riwayatIPL
+    : [{ dari: null, sampai: null, status: "aktif", tarif: w.iplPerBulan || IPL_PER_BULAN }];
+  const periode = riwayat.find((p) => (!p.dari || p.dari <= monthKey) && (!p.sampai || p.sampai >= monthKey));
+  if (!periode || periode.status === "nonaktif") return { status: "nonaktif", tarif: 0 };
+  return { status: "aktif", tarif: periode.tarif };
+}
+// tambah periode baru — otomatis menutup periode terbuka sebelumnya
+// (set `sampai`-nya ke bulan sebelum periode baru mulai)
+function tambahPeriodeIPL(riwayatLama, periodeBaru) {
+  const bulanSebelum = (mk) => { const [y, m] = mk.split("-").map(Number); const d = new Date(y, m - 2, 1); return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}`; };
+  const riwayat = (riwayatLama || []).map((p) => p.sampai === null ? { ...p, sampai: bulanSebelum(periodeBaru.dari) } : p);
+  return [...riwayat, { id: uid(), ...periodeBaru }].sort((a, b) => (a.dari || "0000-00").localeCompare(b.dari || "0000-00"));
+}
 
 // status organisasi — dropdown baku, dikelola admin lewat menu Akses
 const STATUS_OPTIONS = ["Ketua", "Bendahara", "Sekretaris", "Keamanan", "EO & Dokumentasi", "Security", "Warga"];
@@ -189,6 +260,11 @@ const ARREARS_3 = new Set([7, 22]);
 const ARREARS_2 = new Set([2, 15, 28]);
 const ARREARS_1 = new Set([5, 9, 18, 31]);
 const MENUNGGU_BULAN_INI = new Set([0, 4, 12, 20, 25]);
+// skenario partisipasi Iuran THR 2026 (sukarela — sengaja tidak semua ikut)
+const THR_50RB = new Set([1, 3, 6, 8, 10, 13, 16, 19, 21, 24, 27, 30, 33, 35]); // 14 rumah @ Rp50rb
+const THR_100RB = new Set([4, 11, 17, 26, 32]); // 5 rumah @ Rp100rb
+const THR_LEBIH = { 14: 150000, 23: 200000, 29: 250000 }; // 3 rumah, nominal lebih besar
+const THR_MENUNGGU = { 2: 50000, 20: 100000 }; // 2 rumah sudah upload, menunggu verifikasi pengurus
 
 // `warga` = entitas RUMAH (bukan orang) — 1 baris per no. rumah (format
 // "SBT 01".."SBT 36"), jadi dasar kewajiban IPL. Nama & nomor HP penghuni
@@ -209,11 +285,38 @@ const seedWarga = semuaNamaBlok.map(([_namaAwal], i) => {
     else if (k === 0 && menungguBulanIni) statusBayar[monthKey] = { status: "menunggu", bukti: BUKTI_CONTOH };
     else statusBayar[monthKey] = { status: "lunas", bukti: null };
   });
+  const thr = {};
+  if (THR_50RB.has(i)) thr["2026"] = { status: "lunas", jumlah: 50000, bukti: null };
+  else if (THR_100RB.has(i)) thr["2026"] = { status: "lunas", jumlah: 100000, bukti: null };
+  else if (THR_LEBIH[i]) thr["2026"] = { status: "lunas", jumlah: THR_LEBIH[i], bukti: null };
+  else if (THR_MENUNGGU[i]) thr["2026"] = { status: "menunggu", jumlah: THR_MENUNGGU[i], bukti: BUKTI_CONTOH };
+  // riwayat status IPL — contoh kasus nyata di 2 rumah pertama, sisanya
+  // default 1 periode aktif-normal terbuka (belum pernah berubah)
+  let riwayatIPL;
+  if (i === 0) {
+    // SBT 01: dihuni & tarif normal Jan-Mei, lalu kosong tapi pemilik tetap
+    // wajib kontribusi dengan tarif diskon sejak Juni
+    riwayatIPL = [
+      { id: "r1a", dari: "2026-01", sampai: "2026-05", status: "aktif", tarif: IPL_PER_BULAN },
+      { id: "r1b", dari: "2026-06", sampai: null, status: "aktif", tarif: IPL_DISKON },
+    ];
+  } else if (i === 1) {
+    // SBT 02: normal Jan-Mei, disita bank sejak Juni — tidak ada kewajiban
+    // sampai ada pemilik baru (pengurus tinggal tambah periode baru nanti)
+    riwayatIPL = [
+      { id: "r2a", dari: "2026-01", sampai: "2026-05", status: "aktif", tarif: IPL_PER_BULAN },
+      { id: "r2b", dari: "2026-06", sampai: null, status: "nonaktif", tarif: 0 },
+    ];
+  } else {
+    riwayatIPL = [{ id: `r${i}-default`, dari: null, sampai: null, status: "aktif", tarif: IPL_PER_BULAN }];
+  }
   return {
     id: `w${i + 1}`,
     noRumah: formatNoRumah(i),
     iplPerBulan: IPL_PER_BULAN,
     statusBayar,
+    thr,
+    riwayatIPL,
   };
 });
 
@@ -278,27 +381,36 @@ const seedAbsensiSecurity = (() => {
 // (selaras dengan cakupan dropdown bulan di menu Laporan)
 const seedPemasukanDariIuran = seedWarga.flatMap((w) =>
   recentMonths
-    .filter((monthKey) => w.statusBayar[monthKey]?.status === "lunas")
+    .filter((monthKey) => getTagihanBulan(w, monthKey).status === "aktif" && w.statusBayar[monthKey]?.status === "lunas")
     .map((monthKey) => ({
       id: `masuk-${w.id}-${monthKey}`, tipe: "masuk", tanggal: `${monthKey}-05`,
       kategori: "Pembayaran IPL", subkategori: null,
-      keterangan: `IPL ${monthLabel(monthKey)} — ${w.noRumah}`, jumlah: w.iplPerBulan,
+      keterangan: `IPL ${monthLabel(monthKey)} — ${w.noRumah}`, jumlah: getTagihanBulan(w, monthKey).tarif,
       wargaId: w.id, monthKey,
     }))
 );
+const seedPemasukanDariThr = seedWarga
+  .filter((w) => w.thr?.["2026"]?.status === "lunas")
+  .map((w) => ({
+    id: `masuk-thr-${w.id}`, tipe: "masuk", tanggal: `${THR_CONFIG_DEFAULT.bulan}-20`,
+    kategori: "Iuran THR", subkategori: null,
+    keterangan: `Iuran THR 2026 — ${w.noRumah}`, jumlah: w.thr["2026"].jumlah,
+    wargaId: w.id, thrTahun: "2026",
+  }));
 
 const seedTransaksi = [
   ...seedPemasukanDariIuran,
-  { id: "t1", tipe: "keluar", tanggal: `${recentMonths[0]}-05`, kategori: "Keamanan", subkategori: "Pembayaran Gaji Security", keterangan: "Gaji bulanan — Pak Sandi", jumlah: 1650000 },
-  { id: "t2", tipe: "keluar", tanggal: `${recentMonths[0]}-05`, kategori: "Keamanan", subkategori: "Pembayaran Gaji Security", keterangan: "Gaji bulanan — Pak Fajar", jumlah: 1650000 },
-  { id: "t3", tipe: "keluar", tanggal: `${recentMonths[0]}-05`, kategori: "Keamanan", subkategori: "Pembayaran Gaji Security", keterangan: "Gaji bulanan — Pak Ferial", jumlah: 1650000 },
-  { id: "t4", tipe: "keluar", tanggal: `${recentMonths[0]}-05`, kategori: "Keamanan", subkategori: "Pembayaran Insentif Bhabinkamtibmas", keterangan: "Insentif bulanan", jumlah: 100000 },
-  { id: "t5", tipe: "keluar", tanggal: `${recentMonths[0]}-05`, kategori: "Keamanan", subkategori: "Pembayaran Insentif Bhabinsa", keterangan: "Insentif bulanan", jumlah: 100000 },
-  { id: "t5b", tipe: "keluar", tanggal: `${recentMonths[0]}-11`, kategori: "Keamanan", subkategori: "Kasbon Security", keterangan: "Kasbon — Pak Sandi (keperluan keluarga mendesak)", jumlah: 500000 },
-  { id: "t6", tipe: "keluar", tanggal: `${recentMonths[0]}-08`, kategori: "Kebersihan", subkategori: "Jasa Pengambilan Sampah", keterangan: "Iuran petugas kebersihan bulanan", jumlah: 500000 },
-  { id: "t7", tipe: "keluar", tanggal: `${recentMonths[0]}-10`, kategori: "Tagihan", subkategori: "Tagihan Listrik", keterangan: "Listrik pos satpam & taman", jumlah: 350000 },
-  { id: "t8", tipe: "keluar", tanggal: `${recentMonths[0]}-07`, kategori: "Kegiatan", subkategori: "Kerja Bakti", keterangan: "Konsumsi kerja bakti bulanan", jumlah: 600000 },
-  { id: "t9", tipe: "keluar", tanggal: `${recentMonths[0]}-12`, kategori: "Iuran RT", subkategori: "Iuran Dana Kematian", keterangan: "Setoran dana kematian bulanan", jumlah: 300000 },
+  ...seedPemasukanDariThr,
+  { id: "t1", tipe: "keluar", tanggal: `${recentMonths[0]}-05`, kategori: "Gaji Security", subkategori: "Pembayaran Gaji Security", keterangan: "Gaji bulanan — Pak Sandi", jumlah: 1650000 },
+  { id: "t2", tipe: "keluar", tanggal: `${recentMonths[0]}-05`, kategori: "Gaji Security", subkategori: "Pembayaran Gaji Security", keterangan: "Gaji bulanan — Pak Fajar", jumlah: 1650000 },
+  { id: "t3", tipe: "keluar", tanggal: `${recentMonths[0]}-05`, kategori: "Gaji Security", subkategori: "Pembayaran Gaji Security", keterangan: "Gaji bulanan — Pak Ferial", jumlah: 1650000 },
+  { id: "t4", tipe: "keluar", tanggal: `${recentMonths[0]}-05`, kategori: "Insentif Babinsa/Bhabinkamtibmas", subkategori: "Insentif Bhabinkamtibmas", keterangan: "Insentif bulanan", jumlah: 100000 },
+  { id: "t5", tipe: "keluar", tanggal: `${recentMonths[0]}-05`, kategori: "Insentif Babinsa/Bhabinkamtibmas", subkategori: "Insentif Bhabinsa", keterangan: "Insentif bulanan", jumlah: 100000 },
+  { id: "t5b", tipe: "keluar", tanggal: `${recentMonths[0]}-11`, kategori: "Gaji Security", subkategori: "Kasbon Security", keterangan: "Kasbon — Pak Sandi (keperluan keluarga mendesak)", jumlah: 500000 },
+  { id: "t6", tipe: "keluar", tanggal: `${recentMonths[0]}-08`, kategori: "Jasa Pengambilan Sampah", subkategori: "Jasa Pengambilan Sampah", keterangan: "Iuran petugas kebersihan bulanan", jumlah: 500000 },
+  { id: "t7", tipe: "keluar", tanggal: `${recentMonths[0]}-10`, kategori: "Tagihan Bulanan", subkategori: "Tagihan Listrik", keterangan: "Listrik pos satpam & taman", jumlah: 350000 },
+  { id: "t8", tipe: "keluar", tanggal: `${recentMonths[0]}-07`, kategori: "Kegiatan Warga (Umum)", subkategori: "Kerja Bakti", keterangan: "Konsumsi kerja bakti bulanan", jumlah: 600000 },
+  { id: "t9", tipe: "keluar", tanggal: `${recentMonths[0]}-12`, kategori: "Iuran RT / Dana Kematian", subkategori: "Iuran Dana Kematian", keterangan: "Setoran dana kematian bulanan", jumlah: 300000 },
 ];
 
 // Hotline Center Kota Bogor — sumber: akun Instagram resmi @dinkeskotabogor
@@ -411,7 +523,7 @@ const COLORS = {
 // ============================================================
 // storage
 // ============================================================
-const KEYS = { warga: "sbt:warga:v5", transaksi: "sbt:transaksi:v3", kegiatan: "sbt:kegiatan:v3", pengguna: "sbt:pengguna:v7", absensi: "sbt:absensi:v1", jabatanOptions: "sbt:jabatanoptions:v1", kontakDarurat: "sbt:kontakdarurat:v2", perangkatDesa: "sbt:perangkatdesa:v2" };
+const KEYS = { warga: "sbt:warga:v5", transaksi: "sbt:transaksi:v3", kegiatan: "sbt:kegiatan:v3", pengguna: "sbt:pengguna:v7", absensi: "sbt:absensi:v1", jabatanOptions: "sbt:jabatanoptions:v1", kontakDarurat: "sbt:kontakdarurat:v2", perangkatDesa: "sbt:perangkatdesa:v2", posAnggaran: "sbt:posanggaran:v1", thrConfig: "sbt:thrconfig:v1" };
 async function loadKey(key, fallback) {
   try {
     if (typeof window !== "undefined" && window.storage) {
@@ -582,26 +694,6 @@ function MasukKeluarChart({ data }) {
   );
 }
 
-function SebaranTunggakanChart({ data }) {
-  const maxJumlah = Math.max(...data.map((d) => d.jumlah), 1);
-  return (
-    <div style={{ display: "flex", alignItems: "flex-end", gap: 14, height: 130, padding: "6px 4px 0" }}>
-      {data.map((d) => (
-        <div key={d.label} style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", gap: 6, height: "100%", justifyContent: "flex-end" }}>
-          {d.jumlah > 0 && <div className="mono" style={{ fontSize: 12, fontWeight: 700, color: COLORS.danger }}>{d.jumlah}</div>}
-          <div style={{
-            width: "100%", maxWidth: 44,
-            height: d.jumlah === 0 ? 3 : `${Math.max(10, (d.jumlah / maxJumlah) * 90)}%`,
-            background: d.jumlah === 0 ? COLORS.divider : COLORS.danger,
-            borderRadius: "6px 6px 2px 2px",
-          }} />
-          <div style={{ fontSize: 11, color: COLORS.inkSoft }}>{d.label}</div>
-        </div>
-      ))}
-    </div>
-  );
-}
-
 function KpiCard({ icon: Icon, iconBg, iconColor, cardBg, label, value, valueColor, style }) {
   return (
     <Card style={{ padding: 13, background: cardBg || COLORS.card, display: "flex", alignItems: "center", gap: 11, ...style }}>
@@ -639,6 +731,63 @@ function DualStatCard({ icon: Icon, iconBg, iconColor, title, statA, statB, styl
         </div>
       </div>
     </Card>
+  );
+}
+
+function BudgetGrupSection({ grup, items }) {
+  const [open, setOpen] = useState(false);
+  const grupPagu = items.reduce((s, p) => s + p.pagu, 0);
+  const grupRealisasi = items.reduce((s, p) => s + p.realisasi, 0);
+  const pct = grupPagu > 0 ? Math.min(100, (grupRealisasi / grupPagu) * 100) : 0;
+  const overBudget = grupPagu > 0 && grupRealisasi > grupPagu;
+
+  return (
+    <div>
+      <button onClick={() => setOpen(!open)} style={{ width: "100%", background: "none", border: "none", padding: 0, cursor: "pointer", textAlign: "left", display: "block" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, marginBottom: 6 }}>
+          <span style={{ fontWeight: 700, fontSize: 13, color: COLORS.accent, display: "flex", alignItems: "center", gap: 5 }}>
+            {grup}
+            <ChevronDown size={13} color={COLORS.accent} style={{ transform: open ? "rotate(180deg)" : "none", transition: "transform .15s" }} />
+          </span>
+          <span className="mono" style={{ fontSize: 12.5, fontWeight: 700, color: overBudget ? COLORS.danger : COLORS.ink, flexShrink: 0 }}>{formatRp(grupRealisasi)} <span style={{ color: COLORS.inkFaint, fontWeight: 500 }}>/ {formatRp(grupPagu)}</span></span>
+        </div>
+        <div style={{ height: 7, background: COLORS.bg, borderRadius: 4 }}>
+          <div style={{ height: "100%", width: `${pct}%`, background: overBudget ? COLORS.danger : COLORS.accent, borderRadius: 4 }} />
+        </div>
+      </button>
+      {open && (
+        <div style={{ display: "flex", flexDirection: "column", gap: 16, marginTop: 16, paddingLeft: 12, borderLeft: `2px solid ${COLORS.divider}` }}>
+          {items.map((pos) => (
+            <BudgetPosItem
+              key={pos.id}
+              nama={pos.nama}
+              catatan={pos.catatan}
+              realisasi={pos.realisasi}
+              pagu={pos.pagu}
+              color={COLORS.accent}
+            />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function BudgetPosItem({ nama, realisasi, pagu, color, catatan }) {
+  const pct = pagu > 0 ? Math.min(100, (realisasi / pagu) * 100) : 0;
+  const overBudget = pagu > 0 && realisasi > pagu;
+
+  return (
+    <div>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: 13, marginBottom: 4, gap: 8 }}>
+        <span style={{ fontWeight: 600 }}>{nama}{catatan && <span style={{ fontWeight: 400, fontSize: 11, color: COLORS.inkFaint }}> ({catatan})</span>}</span>
+        <span className="mono" style={{ fontWeight: 700, color: overBudget ? COLORS.danger : color, flexShrink: 0 }}>{formatRp(realisasi)}</span>
+      </div>
+      <div style={{ height: 6, background: COLORS.bg, borderRadius: 3, marginBottom: 4 }}>
+        <div style={{ height: "100%", width: `${pct}%`, background: overBudget ? COLORS.danger : color, borderRadius: 3 }} />
+      </div>
+      <div style={{ fontSize: 11, color: COLORS.inkFaint }}>dari pagu {formatRp(pagu)}{overBudget ? " — melebihi pagu" : ""}</div>
+    </div>
   );
 }
 
@@ -703,6 +852,104 @@ function CollapsibleCard({ icon: Icon, title, subtitle, defaultOpen = true, chil
   );
 }
 
+function PosAnggaranManager({ posAnggaran, onAddPos, onRenamePos, onDeletePos, onAddSub, onDeleteSub, onUpdatePagu }) {
+  const [grupBaru, setGrupBaru] = useState("");
+  const [namaPosBaru, setNamaPosBaru] = useState("");
+  const [paguBaru, setPaguBaru] = useState("");
+  const [subBaruInput, setSubBaruInput] = useState({});
+  const [renaming, setRenaming] = useState(null);
+  const [renameValue, setRenameValue] = useState("");
+  const [editingPagu, setEditingPagu] = useState(null);
+  const [paguValue, setPaguValue] = useState("");
+
+  function submitPosBaru() {
+    if (!grupBaru.trim() || !namaPosBaru.trim()) return;
+    onAddPos(grupBaru, namaPosBaru, Number(paguBaru) || 0);
+    setNamaPosBaru(""); setPaguBaru("");
+  }
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 18 }}>
+      {posAnggaran.map((g) => (
+        <div key={g.grup} style={{ border: `1px solid ${COLORS.divider}`, borderRadius: 10, padding: 12 }}>
+          <div style={{ fontWeight: 700, fontSize: 12.5, color: COLORS.accent, marginBottom: 12 }}>{g.grup}</div>
+          <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+            {g.pos.map((p) => (
+              <div key={p.id} style={{ borderBottom: `1px dashed ${COLORS.divider}`, paddingBottom: 12 }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, marginBottom: 6 }}>
+                  {renaming === p.id ? (
+                    <div style={{ display: "flex", gap: 6, flex: 1 }}>
+                      <input autoFocus value={renameValue} onChange={(e) => setRenameValue(e.target.value)} style={{ ...inputStyle, flex: 1, padding: "6px 10px" }} />
+                      <Btn type="button" onClick={() => { onRenamePos(p.id, renameValue); setRenaming(null); }} style={{ padding: "6px 10px", fontSize: 12 }}>Simpan</Btn>
+                      <Btn type="button" variant="ghost" onClick={() => setRenaming(null)} style={{ padding: "6px 10px", fontSize: 12 }}>Batal</Btn>
+                    </div>
+                  ) : (
+                    <>
+                      <div style={{ fontWeight: 600, fontSize: 13 }}>{p.nama}</div>
+                      <div style={{ display: "flex", gap: 6 }}>
+                        <button onClick={() => { setRenaming(p.id); setRenameValue(p.nama); }} aria-label="Ganti nama" style={{ background: COLORS.bg, border: "none", borderRadius: 999, width: 24, height: 24, cursor: "pointer", color: COLORS.inkSoft, display: "flex", alignItems: "center", justifyContent: "center" }}><Pencil size={11} /></button>
+                        <button onClick={() => onDeletePos(p.id)} aria-label="Hapus pos" style={{ background: COLORS.dangerSoft, border: "none", borderRadius: 999, width: 24, height: 24, cursor: "pointer", color: COLORS.danger, display: "flex", alignItems: "center", justifyContent: "center" }}><Trash2 size={11} /></button>
+                      </div>
+                    </>
+                  )}
+                </div>
+                <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
+                  <span style={{ fontSize: 11, color: COLORS.inkFaint }}>Pagu/tahun:</span>
+                  {editingPagu === p.id ? (
+                    <>
+                      <input type="number" autoFocus value={paguValue} onChange={(e) => setPaguValue(e.target.value)} style={{ ...inputStyle, padding: "4px 8px", fontSize: 11.5, width: 120 }} />
+                      <button onClick={() => { onUpdatePagu(p.id, Number(paguValue) || 0); setEditingPagu(null); }} aria-label="Simpan pagu" style={{ background: "none", border: "none", cursor: "pointer", color: COLORS.success, display: "flex" }}><CheckCircle2 size={14} /></button>
+                    </>
+                  ) : (
+                    <>
+                      <span className="mono" style={{ fontSize: 12, fontWeight: 700 }}>{formatRp(p.pagu)}</span>
+                      <button onClick={() => { setPaguValue(String(p.pagu)); setEditingPagu(p.id); }} aria-label="Edit pagu" style={{ background: "none", border: "none", cursor: "pointer", color: COLORS.inkFaint, display: "flex" }}><Pencil size={11} /></button>
+                    </>
+                  )}
+                </div>
+                <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 8 }}>
+                  {p.sub.map((s) => (
+                    <span key={s} style={{ display: "inline-flex", alignItems: "center", gap: 5, fontSize: 11.5, padding: "4px 8px", borderRadius: 999, background: COLORS.bg, color: COLORS.ink }}>
+                      {s}
+                      <button onClick={() => onDeleteSub(p.id, s)} aria-label={`Hapus ${s}`} style={{ background: "none", border: "none", cursor: "pointer", color: COLORS.inkFaint, display: "flex", padding: 0 }}><X size={11} /></button>
+                    </span>
+                  ))}
+                  {p.sub.length === 0 && <span style={{ fontSize: 11.5, color: COLORS.inkFaint }}>Belum ada sub-kategori.</span>}
+                </div>
+                <div style={{ display: "flex", gap: 6 }}>
+                  <input
+                    value={subBaruInput[p.id] || ""}
+                    onChange={(e) => setSubBaruInput((prev) => ({ ...prev, [p.id]: e.target.value }))}
+                    placeholder="Sub-kategori baru"
+                    style={{ ...inputStyle, flex: 1, padding: "6px 10px", fontSize: 12.5 }}
+                    onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); onAddSub(p.id, subBaruInput[p.id] || ""); setSubBaruInput((prev) => ({ ...prev, [p.id]: "" })); } }}
+                  />
+                  <Btn type="button" variant="ghost" onClick={() => { onAddSub(p.id, subBaruInput[p.id] || ""); setSubBaruInput((prev) => ({ ...prev, [p.id]: "" })); }} style={{ padding: "6px 12px", fontSize: 12 }}>+ Sub</Btn>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      ))}
+
+      <div style={{ border: `1px solid ${COLORS.accent}`, borderRadius: 10, padding: 12 }}>
+        <div style={{ fontWeight: 700, fontSize: 12.5, marginBottom: 10 }}>Tambah Pos Baru</div>
+        <datalist id="daftar-grup-anggaran">
+          {posAnggaran.map((g) => <option key={g.grup} value={g.grup} />)}
+        </datalist>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 8 }}>
+          <input list="daftar-grup-anggaran" value={grupBaru} onChange={(e) => setGrupBaru(e.target.value)} placeholder="Grup (pilih/ketik baru)" style={{ ...inputStyle, fontSize: 12.5 }} />
+          <input value={namaPosBaru} onChange={(e) => setNamaPosBaru(e.target.value)} placeholder="Nama pos" style={{ ...inputStyle, fontSize: 12.5 }} />
+        </div>
+        <div style={{ display: "flex", gap: 8 }}>
+          <input type="number" value={paguBaru} onChange={(e) => setPaguBaru(e.target.value)} placeholder="Pagu/tahun (Rp)" style={{ ...inputStyle, flex: 1, fontSize: 12.5 }} />
+          <Btn type="button" onClick={submitPosBaru}><Plus size={14} /> Tambah Pos</Btn>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function TxCard({ t, onEdit, onDelete }) {
   const [confirming, setConfirming] = useState(false);
   return (
@@ -756,6 +1003,8 @@ export default function SBTPintar() {
   const [jabatanOptions, setJabatanOptions] = useState(JABATAN_OPTIONS_DEFAULT);
   const [kontakDarurat, setKontakDarurat] = useState(seedKontakDarurat);
   const [perangkatDesa, setPerangkatDesa] = useState(seedPerangkatDesa);
+  const [posAnggaran, setPosAnggaran] = useState(POS_ANGGARAN_DEFAULT);
+  const [thrConfig, setThrConfig] = useState(THR_CONFIG_DEFAULT);
   const [showAddKontak, setShowAddKontak] = useState(false);
   const [editingKontak, setEditingKontak] = useState(null);
   const [showAddPerangkat, setShowAddPerangkat] = useState(false);
@@ -772,7 +1021,6 @@ export default function SBTPintar() {
   }, [role, tab]);
   const [laporanBulan, setLaporanBulan] = useState(currentMonthKey);
   const [showExpenseForm, setShowExpenseForm] = useState(false);
-  const [showPemasukanForm, setShowPemasukanForm] = useState(false);
   const [editingExpense, setEditingExpense] = useState(null);
   const [showKegiatanForm, setShowKegiatanForm] = useState(false);
   const [editingKegiatan, setEditingKegiatan] = useState(null);
@@ -781,8 +1029,11 @@ export default function SBTPintar() {
   const [addUserDefaultRole, setAddUserDefaultRole] = useState("warga");
   const [showGantiPin, setShowGantiPin] = useState(false);
   const [editingWarga, setEditingWarga] = useState(null);
+  const [kelolaIPLRumah, setKelolaIPLRumah] = useState(null);
   const [showPayModal, setShowPayModal] = useState(false);
+  const [showPayThrModal, setShowPayThrModal] = useState(false);
   const [cellModal, setCellModal] = useState(null); // { warga, monthKey }
+  const [thrCellModal, setThrCellModal] = useState(null); // { warga, kontakUtama }
   const [gridFilter, setGridFilter] = useState("semua");
   const [toast, setToast] = useState(null);
 
@@ -799,11 +1050,12 @@ export default function SBTPintar() {
     document.head.appendChild(link);
 
     (async () => {
-      const [w, t, k, p, abs, so, kd, pd] = await Promise.all([
+      const [w, t, k, p, abs, so, kd, pd, pa, tc] = await Promise.all([
         loadKey(KEYS.warga, null), loadKey(KEYS.transaksi, null),
         loadKey(KEYS.kegiatan, null), loadKey(KEYS.pengguna, null),
         loadKey(KEYS.absensi, null), loadKey(KEYS.jabatanOptions, null),
         loadKey(KEYS.kontakDarurat, null), loadKey(KEYS.perangkatDesa, null),
+        loadKey(KEYS.posAnggaran, null), loadKey(KEYS.thrConfig, null),
       ]);
       if (w) setWarga(w); else saveKey(KEYS.warga, seedWarga);
       if (t) setTransaksi(t); else saveKey(KEYS.transaksi, seedTransaksi);
@@ -813,6 +1065,8 @@ export default function SBTPintar() {
       if (so) setJabatanOptions(so); else saveKey(KEYS.jabatanOptions, JABATAN_OPTIONS_DEFAULT);
       if (kd) setKontakDarurat(kd); else saveKey(KEYS.kontakDarurat, seedKontakDarurat);
       if (pd) setPerangkatDesa(pd); else saveKey(KEYS.perangkatDesa, seedPerangkatDesa);
+      if (pa) setPosAnggaran(pa); else saveKey(KEYS.posAnggaran, POS_ANGGARAN_DEFAULT);
+      if (tc) setThrConfig(tc); else saveKey(KEYS.thrConfig, THR_CONFIG_DEFAULT);
       setLoading(false);
     })();
   }, []);
@@ -894,7 +1148,8 @@ export default function SBTPintar() {
       return next;
     });
     setTransaksi((prev) => {
-      const next = [...prev, { id: uid(), tipe: "masuk", tanggal: todayISO(), kategori: "Pembayaran IPL", subkategori: null, keterangan: `IPL ${monthLabel(monthKey)} — ${w ? w.noRumah : ""}`, jumlah: w ? w.iplPerBulan : IPL_PER_BULAN, wargaId, monthKey }];
+      const tarif = w ? getTagihanBulan(w, monthKey).tarif : IPL_PER_BULAN;
+      const next = [...prev, { id: uid(), tipe: "masuk", tanggal: todayISO(), kategori: "Pembayaran IPL", subkategori: null, keterangan: `IPL ${monthLabel(monthKey)} — ${w ? w.noRumah : ""}`, jumlah: tarif, wargaId, monthKey }];
       saveKey(KEYS.transaksi, next);
       return next;
     });
@@ -913,6 +1168,58 @@ export default function SBTPintar() {
       return next;
     });
   }, []);
+
+  // ---- riwayat status IPL per rumah (aktif/nonaktif, tarif normal/diskon) ----
+  const tambahPeriodeIPLWarga = (wargaId, periodeBaru) => {
+    setWarga((prev) => {
+      const next = prev.map((w) => w.id === wargaId ? { ...w, riwayatIPL: tambahPeriodeIPL(w.riwayatIPL, periodeBaru) } : w);
+      saveKey(KEYS.warga, next);
+      return next;
+    });
+    setToast("Status IPL rumah diperbarui.");
+  };
+
+  // ---- Iuran THR — sukarela, 1x/tahun, nominal bebas per rumah ----
+  const uploadBuktiThr = useCallback((wargaId, tahun, jumlah, dataUrl) => {
+    setWarga((prev) => {
+      const next = prev.map((w) => w.id === wargaId ? { ...w, thr: { ...w.thr, [tahun]: { status: "menunggu", jumlah, bukti: dataUrl } } } : w);
+      saveKey(KEYS.warga, next);
+      return next;
+    });
+    setToast("Konfirmasi iuran THR terkirim, menunggu verifikasi pengurus.");
+  }, []);
+  const verifikasiThrLunas = useCallback((wargaId, tahun, jumlahFinal) => {
+    const w = warga.find((x) => x.id === wargaId);
+    const entry = w?.thr?.[tahun];
+    const jumlah = jumlahFinal ?? entry?.jumlah ?? 0;
+    setWarga((prev) => {
+      const next = prev.map((x) => x.id === wargaId ? { ...x, thr: { ...x.thr, [tahun]: { ...x.thr?.[tahun], status: "lunas", jumlah } } } : x);
+      saveKey(KEYS.warga, next);
+      return next;
+    });
+    setTransaksi((prev) => {
+      const next = [...prev, { id: uid(), tipe: "masuk", tanggal: todayISO(), kategori: "Iuran THR", subkategori: null, keterangan: `Iuran THR ${tahun} — ${w ? w.noRumah : ""}`, jumlah, wargaId, thrTahun: tahun }];
+      saveKey(KEYS.transaksi, next);
+      return next;
+    });
+    setToast("Iuran THR ditandai lunas.");
+  }, [warga]);
+  const batalkanThr = useCallback((wargaId, tahun) => {
+    setWarga((prev) => {
+      const next = prev.map((w) => w.id === wargaId ? { ...w, thr: { ...w.thr, [tahun]: { status: "belum", jumlah: 0, bukti: null } } } : w);
+      saveKey(KEYS.warga, next);
+      return next;
+    });
+    setTransaksi((prev) => {
+      const next = prev.filter((t) => !(t.wargaId === wargaId && t.thrTahun === tahun));
+      saveKey(KEYS.transaksi, next);
+      return next;
+    });
+  }, []);
+  const updateThrConfig = (data) => {
+    setThrConfig((prev) => { const next = { ...prev, ...data }; saveKey(KEYS.thrConfig, next); return next; });
+  };
+
   const updateWargaLengkap = (id, data) => {
     setPengguna((prev) => {
       let next = prev.map((p) => p.id === id ? { ...p, ...data } : p);
@@ -930,10 +1237,6 @@ export default function SBTPintar() {
   const addExpense = (data) => {
     setTransaksi((prev) => { const next = [...prev, { id: uid(), tipe: "keluar", ...data }]; saveKey(KEYS.transaksi, next); return next; });
     setShowExpenseForm(false);
-  };
-  const addPemasukanLain = (data) => {
-    setTransaksi((prev) => { const next = [...prev, { id: uid(), tipe: "masuk", ...data }]; saveKey(KEYS.transaksi, next); return next; });
-    setShowPemasukanForm(false);
   };
   const updateExpense = (id, data) => {
     setTransaksi((prev) => { const next = prev.map((t) => t.id === id ? { ...t, ...data } : t); saveKey(KEYS.transaksi, next); return next; });
@@ -1036,6 +1339,77 @@ export default function SBTPintar() {
     setPerangkatDesa((prev) => { const next = prev.filter((p) => p.id !== id); saveKey(KEYS.perangkatDesa, next); return next; });
   };
 
+  // ---- pos anggaran (kategori transaksi + budget tahunan, 1 sumber) ----
+  const updatePagu = (id, paguBaru) => {
+    setPosAnggaran((prev) => {
+      const next = prev.map((g) => ({ ...g, pos: g.pos.map((p) => p.id === id ? { ...p, pagu: paguBaru } : p) }));
+      saveKey(KEYS.posAnggaran, next);
+      return next;
+    });
+  };
+  const addPos = (grup, nama, pagu) => {
+    const cleanGrup = grup.trim();
+    const cleanNama = nama.trim();
+    if (!cleanGrup || !cleanNama) return;
+    if (flattenPos(posAnggaran).some((p) => p.nama === cleanNama)) { setToast(`Pos "${cleanNama}" sudah ada.`); return; }
+    setPosAnggaran((prev) => {
+      const next = [...prev];
+      const idx = next.findIndex((g) => g.grup === cleanGrup);
+      const posBaru = { id: uid(), nama: cleanNama, pagu: Number(pagu) || 0, sub: [] };
+      if (idx >= 0) next[idx] = { ...next[idx], pos: [...next[idx].pos, posBaru] };
+      else next.push({ grup: cleanGrup, pos: [posBaru] });
+      saveKey(KEYS.posAnggaran, next);
+      return next;
+    });
+  };
+  const renamePos = (id, namaBaru) => {
+    const clean = namaBaru.trim();
+    const posLama = flattenPos(posAnggaran).find((p) => p.id === id);
+    if (!clean || !posLama || clean === posLama.nama) return;
+    if (flattenPos(posAnggaran).some((p) => p.nama === clean)) { setToast(`Pos "${clean}" sudah ada.`); return; }
+    setPosAnggaran((prev) => {
+      const next = prev.map((g) => ({ ...g, pos: g.pos.map((p) => p.id === id ? { ...p, nama: clean } : p) }));
+      saveKey(KEYS.posAnggaran, next);
+      return next;
+    });
+    setTransaksi((prev) => {
+      const next = prev.map((t) => t.kategori === posLama.nama ? { ...t, kategori: clean } : t);
+      saveKey(KEYS.transaksi, next);
+      return next;
+    });
+  };
+  const deletePos = (id) => {
+    const pos = flattenPos(posAnggaran).find((p) => p.id === id);
+    if (!pos) return;
+    const dipakai = transaksi.some((t) => t.kategori === pos.nama);
+    if (dipakai) { setToast(`Tidak bisa hapus "${pos.nama}" — masih ada transaksi pakai pos ini.`); return; }
+    setPosAnggaran((prev) => {
+      const next = prev.map((g) => ({ ...g, pos: g.pos.filter((p) => p.id !== id) })).filter((g) => g.pos.length > 0);
+      saveKey(KEYS.posAnggaran, next);
+      return next;
+    });
+  };
+  const addSubPos = (id, sub) => {
+    const clean = sub.trim();
+    if (!clean) return;
+    setPosAnggaran((prev) => {
+      const next = prev.map((g) => ({ ...g, pos: g.pos.map((p) => p.id === id && !p.sub.includes(clean) ? { ...p, sub: [...p.sub, clean] } : p) }));
+      saveKey(KEYS.posAnggaran, next);
+      return next;
+    });
+  };
+  const deleteSubPos = (id, sub) => {
+    const pos = flattenPos(posAnggaran).find((p) => p.id === id);
+    if (!pos) return;
+    const dipakai = transaksi.some((t) => t.kategori === pos.nama && t.subkategori === sub);
+    if (dipakai) { setToast(`Tidak bisa hapus "${sub}" — masih ada transaksi pakai sub-kategori ini.`); return; }
+    setPosAnggaran((prev) => {
+      const next = prev.map((g) => ({ ...g, pos: g.pos.map((p) => p.id === id ? { ...p, sub: p.sub.filter((s) => s !== sub) } : p) }));
+      saveKey(KEYS.posAnggaran, next);
+      return next;
+    });
+  };
+
   // ---- computed ----
   const saldo = useMemo(() => SALDO_AWAL_KAS + transaksi.reduce((s, t) => s + (t.tipe === "masuk" ? t.jumlah : -t.jumlah), 0), [transaksi]);
   const saldoAkhirBulanLalu = useMemo(() => {
@@ -1045,44 +1419,42 @@ export default function SBTPintar() {
   }, [transaksi]);
   const bulanIniMasuk = useMemo(() => transaksi.filter((t) => t.tipe === "masuk" && monthKeyOf(t.tanggal) === currentMonthKey).reduce((s, t) => s + t.jumlah, 0), [transaksi]);
   const bulanIniKeluar = useMemo(() => transaksi.filter((t) => t.tipe === "keluar" && monthKeyOf(t.tanggal) === currentMonthKey).reduce((s, t) => s + t.jumlah, 0), [transaksi]);
-  const belumBayarCount = useMemo(() => warga.filter((w) => w.statusBayar[currentMonthKey]?.status !== "lunas").length, [warga]);
-  const sudahBayarCount = warga.length - belumBayarCount;
+  const belumBayarCount = useMemo(() => warga.filter((w) => {
+    const tagihan = getTagihanBulan(w, currentMonthKey);
+    return tagihan.status === "aktif" && w.statusBayar[currentMonthKey]?.status !== "lunas";
+  }).length, [warga]);
+  const wargaAktifBulanIni = useMemo(() => warga.filter((w) => getTagihanBulan(w, currentMonthKey).status === "aktif").length, [warga]);
+  const sudahBayarCount = wargaAktifBulanIni - belumBayarCount;
   const totalTunggakanSemua = useMemo(() => warga.reduce((sum, w) => {
-    const bulanBelum = Object.values(w.statusBayar).filter((v) => v.status === "belum").length;
-    return sum + bulanBelum * w.iplPerBulan;
+    let total = 0;
+    Object.keys(w.statusBayar).forEach((mk) => {
+      const tagihan = getTagihanBulan(w, mk);
+      if (tagihan.status === "aktif" && w.statusBayar[mk]?.status === "belum") total += tagihan.tarif;
+    });
+    return sum + total;
   }, 0), [warga]);
   const totalTunggakanBulanIni = useMemo(() => warga.reduce((sum, w) => {
+    const tagihan = getTagihanBulan(w, currentMonthKey);
     const entry = w.statusBayar[currentMonthKey];
-    return sum + (entry?.status === "belum" ? w.iplPerBulan : 0);
+    return sum + (tagihan.status === "aktif" && entry?.status === "belum" ? tagihan.tarif : 0);
   }, 0), [warga]);
   const totalTunggakanMenumpuk = Math.max(0, totalTunggakanSemua - totalTunggakanBulanIni);
 
   // streak tunggakan berjalan per rumah — dihitung mundur dari bulan ini,
-  // berhenti begitu ketemu bulan yang statusnya bukan "belum"
+  // berhenti begitu ketemu bulan yang statusnya bukan "belum" — bulan
+  // dengan status rumah "nonaktif" dilewati saja (tidak menghentikan streak,
+  // tidak dihitung menunggak, karena memang tidak ada kewajiban bulan itu)
   const arrearsStreakByWarga = useMemo(() => warga.map((w) => {
     let streak = 0;
     for (const mk of months12Desc) {
+      const tagihan = getTagihanBulan(w, mk);
+      if (tagihan.status === "nonaktif") continue;
       if (w.statusBayar[mk]?.status === "belum") streak++;
       else break;
     }
     return streak;
   }), [warga]);
   const menunggakCount = useMemo(() => arrearsStreakByWarga.filter((s) => s >= 2).length, [arrearsStreakByWarga]);
-  const sebaranTunggakan = useMemo(() => {
-    const buckets = [
-      { label: "1 bln", jumlah: 0 },
-      { label: "2 bln", jumlah: 0 },
-      { label: "3 bln", jumlah: 0 },
-      { label: "4+ bln", jumlah: 0 },
-    ];
-    arrearsStreakByWarga.forEach((streak) => {
-      if (streak === 1) buckets[0].jumlah++;
-      else if (streak === 2) buckets[1].jumlah++;
-      else if (streak === 3) buckets[2].jumlah++;
-      else if (streak >= 4) buckets[3].jumlah++;
-    });
-    return buckets;
-  }, [arrearsStreakByWarga]);
 
   // tren saldo kas 6 bulan terakhir (akhir tiap bulan)
   const trenSaldoBulanan = useMemo(() => {
@@ -1106,20 +1478,29 @@ export default function SBTPintar() {
   }, [transaksi]);
 
   // breakdown beban operasional bulan ini, per sub-kategori
+  const kategoriOperasional = useMemo(() => getKategoriOperasional(posAnggaran), [posAnggaran]);
   const bebanOperasionalBreakdown = useMemo(() => {
     const map = {};
     transaksi
-      .filter((t) => t.tipe === "keluar" && monthKeyOf(t.tanggal) === currentMonthKey && KATEGORI_OPERASIONAL.includes(t.kategori))
+      .filter((t) => t.tipe === "keluar" && monthKeyOf(t.tanggal) === currentMonthKey && kategoriOperasional.includes(t.kategori))
       .forEach((t) => {
         const key = t.subkategori || t.kategori;
         map[key] = (map[key] || 0) + t.jumlah;
       });
     return Object.entries(map).map(([label, jumlah]) => ({ label, jumlah })).sort((a, b) => b.jumlah - a.jumlah);
-  }, [transaksi]);
+  }, [transaksi, kategoriOperasional]);
   const bebanOperasionalBulanIni = useMemo(() => bebanOperasionalBreakdown.reduce((s, d) => s + d.jumlah, 0), [bebanOperasionalBreakdown]);
   const cadanganKas = bebanOperasionalBulanIni; // rekomendasi: minimal 1x beban operasional bulanan
   const kelonggaranDanaKas = saldo - cadanganKas;
 
+  // budget plan tahunan — realisasi dihitung otomatis dari transaksi tahun berjalan
+  const tahunBerjalan = new Date().getFullYear();
+  const budgetGrup = useMemo(() => posAnggaran.map((g) => ({
+    grup: g.grup,
+    pos: g.pos.map((p) => ({ ...p, realisasi: hitungRealisasiPos(p.nama, transaksi, tahunBerjalan) })),
+  })), [posAnggaran, transaksi, tahunBerjalan]);
+  const totalPagu = useMemo(() => flattenPos(posAnggaran).reduce((s, p) => s + p.pagu, 0), [posAnggaran]);
+  const totalRealisasi = useMemo(() => budgetGrup.reduce((s, g) => s + g.pos.reduce((s2, p) => s2 + p.realisasi, 0), 0), [budgetGrup]);
 
 
   const laporanTx = useMemo(() => transaksi.filter((t) => monthKeyOf(t.tanggal) === laporanBulan), [transaksi, laporanBulan]);
@@ -1133,10 +1514,13 @@ export default function SBTPintar() {
     });
     return Object.entries(map).sort((a, b) => b[1] - a[1]);
   }, [laporanTx]);
-  const targetIPLBulanan = IPL_PER_BULAN * warga.length;
+  const targetIPLBulanan = useMemo(() => warga.reduce((sum, w) => {
+    const tagihan = getTagihanBulan(w, laporanBulan);
+    return sum + (tagihan.status === "aktif" ? tagihan.tarif : 0);
+  }, 0), [warga, laporanBulan]);
   const laporanPemasukanIPLBulanIni = useMemo(() => laporanTx.filter((t) => t.tipe === "masuk" && t.kategori === "Pembayaran IPL" && t.monthKey === laporanBulan).reduce((s, t) => s + t.jumlah, 0), [laporanTx, laporanBulan]);
   const laporanPembayaranTunggakan = useMemo(() => laporanTx.filter((t) => t.tipe === "masuk" && t.kategori === "Pembayaran IPL" && t.monthKey && t.monthKey !== laporanBulan).reduce((s, t) => s + t.jumlah, 0), [laporanTx, laporanBulan]);
-  const laporanPemasukanLainnya = useMemo(() => laporanTx.filter((t) => t.tipe === "masuk" && t.kategori !== "Pembayaran IPL").reduce((s, t) => s + t.jumlah, 0), [laporanTx]);
+  const laporanPemasukanThr = useMemo(() => laporanTx.filter((t) => t.tipe === "masuk" && t.kategori === "Iuran THR").reduce((s, t) => s + t.jumlah, 0), [laporanTx]);
   const mutasiBulanIni = useMemo(() => [...laporanTx].sort((a, b) => b.tanggal.localeCompare(a.tanggal)), [laporanTx]);
 
   // arrears streak (jumlah bulan menunggak berturut-turut dari bulan ini mundur)
@@ -1167,6 +1551,7 @@ export default function SBTPintar() {
     { id: "darurat", label: "Kontak Darurat", icon: Siren },
     { id: "absensi", label: "Absensi Security", icon: ClipboardCheck },
     { id: "warga", label: "Warga", icon: UserCog },
+    ...(canKelolaAkses(role) ? [{ id: "setting", label: "Setting", icon: Settings }] : []),
   ];
 
   if (loading) {
@@ -1188,6 +1573,9 @@ export default function SBTPintar() {
         .mono { font-variant-numeric: tabular-nums; }
         button { font-family: 'Inter', sans-serif; }
         button:focus-visible, select:focus-visible, input:focus-visible, textarea:focus-visible { outline: 2px solid ${COLORS.accent}; outline-offset: 1px; }
+        button { -webkit-tap-highlight-color: transparent; transition: transform .1s ease, opacity .1s ease, filter .1s ease; }
+        button:active:not(:disabled) { transform: scale(0.95); filter: brightness(0.94); }
+        a:active { opacity: 0.7; }
         @media (max-width: 760px) { .sidebar { display: none !important; } .bottomnav { display: flex !important; } .maincol { margin-left: 0 !important; padding: 20px 16px !important; } .grid-scroll { max-width: calc(100vw - 32px); } }
         @media (max-width: 480px) { .header-user-info { max-width: 84px !important; } }
 
@@ -1205,7 +1593,7 @@ export default function SBTPintar() {
           .mono { color: #000 !important; }
           [style*="border-radius"] { border-radius: 0 !important; }
         }
-        .toast { position: fixed; top: 16px; left: 50%; transform: translateX(-50%); background: ${COLORS.ink}; color: #fff; padding: 11px 20px; border-radius: 12px; font-size: 13.5px; z-index: 70; max-width: 90vw; box-shadow: 0 8px 24px rgba(0,0,0,0.2); }
+        .toast { position: fixed; top: 16px; left: 50%; transform: translateX(-50%); background: ${COLORS.ink}; color: #fff; padding: 11px 20px; border-radius: 12px; font-size: 13.5px; z-index: 100; max-width: 90vw; box-shadow: 0 8px 24px rgba(0,0,0,0.2); }
         .grid-cell { width: 34px; height: 34px; border-radius: 9px; display: flex; align-items: center; justify-content: center; cursor: pointer; border: none; transition: transform .1s; }
         .row-3 { display: grid; grid-template-columns: 1fr; gap: 12px; }
         @media (min-width: 560px) { .row-3 { grid-template-columns: 1fr 1fr 1fr; } }
@@ -1250,12 +1638,12 @@ export default function SBTPintar() {
         </nav>
 
         {/* bottom nav (mobile) */}
-        <nav className="bottomnav no-print" style={{ display: "none", position: "fixed", bottom: 0, left: 0, right: 0, background: COLORS.card, borderTop: `1px solid ${COLORS.divider}`, padding: "8px 4px", justifyContent: "space-around", zIndex: 40, WebkitTransform: "translateZ(0)", transform: "translateZ(0)" }}>
+        <nav className="bottomnav no-print" style={{ display: "none", position: "fixed", bottom: 0, left: 0, right: 0, background: COLORS.card, borderTop: `1px solid ${COLORS.divider}`, padding: "8px 4px", overflowX: "auto", WebkitOverflowScrolling: "touch", zIndex: 40, WebkitTransform: "translateZ(0)", transform: "translateZ(0)" }}>
           {tabs.map((t) => {
             const Icon = t.icon; const active = tab === t.id;
             return (
-              <button key={t.id} onClick={() => setTab(t.id)} style={{ background: "none", border: "none", display: "flex", flexDirection: "column", alignItems: "center", gap: 3, color: active ? COLORS.accent : COLORS.inkFaint, fontSize: 10, fontWeight: 600, cursor: "pointer" }}>
-                <Icon size={19} strokeWidth={2.2} /> {t.label}
+              <button key={t.id} onClick={() => setTab(t.id)} style={{ background: "none", border: "none", display: "flex", flexDirection: "column", alignItems: "center", gap: 4, color: active ? COLORS.accent : COLORS.inkFaint, fontSize: 11, fontWeight: 600, cursor: "pointer", flexShrink: 0, minWidth: 68, padding: "2px 4px", whiteSpace: "nowrap" }}>
+                <Icon size={22} strokeWidth={2.2} /> {t.label}
               </button>
             );
           })}
@@ -1276,7 +1664,7 @@ export default function SBTPintar() {
                 <DualStatCard
                   icon={Users} iconBg={COLORS.warningSoft} iconColor={COLORS.warning}
                   title={`Status Bayar IPL ${monthLabel(currentMonthKey)}`}
-                  statA={{ label: "Sudah Bayar", value: `${sudahBayarCount}/${warga.length} (${Math.round((sudahBayarCount / warga.length) * 100)}%)`, color: COLORS.success }}
+                  statA={{ label: "Sudah Bayar", value: `${sudahBayarCount}/${wargaAktifBulanIni} (${wargaAktifBulanIni > 0 ? Math.round((sudahBayarCount / wargaAktifBulanIni) * 100) : 0}%)`, color: COLORS.success }}
                   statB={{ label: "Belum Bayar", value: formatRp(totalTunggakanBulanIni), color: totalTunggakanBulanIni > 0 ? COLORS.warning : COLORS.success }}
                   style={{ gridColumn: "1 / -1" }}
                 />
@@ -1306,19 +1694,22 @@ export default function SBTPintar() {
                   <div style={{ fontSize: 11.5, color: COLORS.inkFaint, padding: "0 20px" }}>Bulanan {new Date().getFullYear()}</div>
                   <div style={{ padding: "8px 16px 4px" }}><MasukKeluarChart data={masukKeluarBulanan} /></div>
                 </Card>
-
-                <Card>
-                  <div style={{ padding: "16px 20px 4px", fontWeight: 700, fontSize: 15.5 }}>Sebaran Warga Menunggak</div>
-                  <div style={{ fontSize: 11.5, color: COLORS.inkFaint, padding: "0 20px" }}>Lama tunggakan, di luar tagihan bulan ini</div>
-                  <div style={{ padding: "8px 16px 12px" }}>
-                    {menunggakCount === 0 ? (
-                      <div style={{ padding: "20px 0", textAlign: "center", color: COLORS.success, fontSize: 13.5, fontWeight: 600 }}>Tidak ada yang menunggak 🎉</div>
-                    ) : (
-                      <SebaranTunggakanChart data={sebaranTunggakan} />
-                    )}
-                  </div>
-                </Card>
               </div>
+
+              <Card style={{ marginTop: 16 }}>
+                <div style={{ padding: "16px 20px", borderBottom: `1px solid ${COLORS.divider}` }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+                    <div style={{ fontWeight: 700, fontSize: 15.5 }}>Budget Plan &amp; Realisasi {tahunBerjalan}</div>
+                    <div className="mono" style={{ fontSize: 12.5, color: totalRealisasi > totalPagu ? COLORS.danger : COLORS.inkSoft }}>{formatRp(totalRealisasi)} / {formatRp(totalPagu)}</div>
+                  </div>
+                  {canCatatKeuangan(role) && <div style={{ fontSize: 11, color: COLORS.inkFaint, marginTop: 4 }}>Atur pagu tiap pos lewat menu Setting → Kelola Pos Anggaran</div>}
+                </div>
+                <div style={{ padding: 18, display: "flex", flexDirection: "column", gap: 22 }}>
+                  {budgetGrup.map((g) => (
+                    <BudgetGrupSection key={g.grup} grup={g.grup} items={g.pos} />
+                  ))}
+                </div>
+              </Card>
             </>
           )}
 
@@ -1326,6 +1717,8 @@ export default function SBTPintar() {
             <WargaIuranView
               myWarga={myWarga}
               onOpenPay={() => setShowPayModal(true)}
+              onOpenPayThr={() => setShowPayThrModal(true)}
+              thrConfig={thrConfig}
             />
           )}
 
@@ -1364,16 +1757,18 @@ export default function SBTPintar() {
                             </div>
                           </td>
                           {months12Asc.map((mk) => {
-                            const st = w.statusBayar[mk]?.status || "belum";
+                            const tagihan = getTagihanBulan(w, mk);
+                            const st = tagihan.status === "nonaktif" ? "nonaktif" : (w.statusBayar[mk]?.status || "belum");
                             const map = {
                               lunas: { bg: COLORS.successSoft, fg: COLORS.success, Icon: CheckCircle2 },
                               menunggu: { bg: COLORS.warningSoft, fg: COLORS.warning, Icon: Clock },
                               belum: { bg: COLORS.dangerSoft, fg: COLORS.danger, Icon: XCircle },
+                              nonaktif: { bg: COLORS.divider, fg: COLORS.inkFaint, Icon: Ban },
                             };
                             const { bg, fg, Icon } = map[st];
                             return (
                               <td key={mk} style={{ textAlign: "center" }}>
-                                <button className="grid-cell" style={{ background: bg, color: fg }} onClick={() => setCellModal({ warga: w, monthKey: mk, kontakUtama })} aria-label={`${kontakUtama ? kontakUtama.nama : w.noRumah} — ${monthLabel(mk)} — ${st}`}>
+                                <button className="grid-cell" style={{ background: bg, color: fg, cursor: st === "nonaktif" ? "default" : "pointer" }} onClick={() => { if (st !== "nonaktif") setCellModal({ warga: w, monthKey: mk, kontakUtama }); }} aria-label={`${kontakUtama ? kontakUtama.nama : w.noRumah} — ${monthLabel(mk)} — ${st}`}>
                                   <Icon size={16} strokeWidth={2.4} />
                                 </button>
                               </td>
@@ -1388,6 +1783,52 @@ export default function SBTPintar() {
                 </div>
               </Card>
               <div style={{ fontSize: 12.5, color: COLORS.inkSoft, marginTop: 12 }}>Ketuk salah satu kotak status untuk verifikasi, kirim pengingat, atau lihat bukti transfer.</div>
+
+              {thrConfig.aktif && (
+                <div style={{ marginTop: 24 }}>
+                  <SectionTitle title={`Iuran THR ${thrConfig.tahun}`} subtitle={`Sukarela · periode ${monthLabel(thrConfig.bulan)}`} />
+                  <Card style={{ overflow: "hidden" }}>
+                    <div className="grid-scroll" style={{ overflowX: "auto" }}>
+                      <table style={{ minWidth: 420 }}>
+                        <thead>
+                          <tr>
+                            <th style={{ position: "sticky", left: 0, background: COLORS.card, minWidth: 170 }}>Rumah</th>
+                            <th style={{ textAlign: "right" }}>Nominal</th>
+                            <th style={{ textAlign: "center" }}>Status</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {warga.map((w) => {
+                            const kontakUtama = getKontakUtama(w.id, pengguna);
+                            const entry = w.thr?.[thrConfig.tahun];
+                            const status = entry?.status || "belum";
+                            const map = {
+                              lunas: { bg: COLORS.successSoft, fg: COLORS.success, Icon: CheckCircle2 },
+                              menunggu: { bg: COLORS.warningSoft, fg: COLORS.warning, Icon: Clock },
+                              belum: { bg: COLORS.dangerSoft, fg: COLORS.danger, Icon: XCircle },
+                            };
+                            const { bg, fg, Icon } = map[status];
+                            return (
+                              <tr key={w.id}>
+                                <td style={{ position: "sticky", left: 0, background: COLORS.card }}>
+                                  <div style={{ fontWeight: 600 }}>{kontakUtama ? kontakUtama.nama : "—"}</div>
+                                  <div className="mono" style={{ fontSize: 11.5, color: COLORS.inkSoft }}>{w.noRumah}</div>
+                                </td>
+                                <td className="mono" style={{ textAlign: "right", fontWeight: 600 }}>{entry?.jumlah > 0 ? formatRp(entry.jumlah) : "—"}</td>
+                                <td style={{ textAlign: "center" }}>
+                                  <button className="grid-cell" style={{ background: bg, color: fg, margin: "0 auto" }} onClick={() => setThrCellModal({ warga: w, kontakUtama })} aria-label={`${kontakUtama ? kontakUtama.nama : w.noRumah} — THR — ${status}`}>
+                                    <Icon size={16} strokeWidth={2.4} />
+                                  </button>
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                  </Card>
+                </div>
+              )}
             </>
           )}
 
@@ -1397,8 +1838,14 @@ export default function SBTPintar() {
                 title="Kegiatan &amp; Notulensi"
                 subtitle={!canApprove(role) ? "Dokumentasi dari pengurus — tampilan lihat saja" : undefined}
               />
-              {showKegiatanForm && <KegiatanForm onCancel={() => setShowKegiatanForm(false)} onSubmit={addKegiatan} />}
-              {editingKegiatan && <KegiatanForm initial={editingKegiatan} onCancel={() => setEditingKegiatan(null)} onSubmit={(data) => editKegiatan(editingKegiatan.id, data)} />}
+              {(showKegiatanForm || editingKegiatan) && (
+                <div style={{ position: "fixed", inset: 0, background: "rgba(29,29,31,0.5)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 80, padding: 16 }}>
+                  <div style={{ width: "100%", maxWidth: 420, maxHeight: "88vh", overflowY: "auto" }}>
+                    {showKegiatanForm && <KegiatanForm onCancel={() => setShowKegiatanForm(false)} onSubmit={addKegiatan} />}
+                    {editingKegiatan && <KegiatanForm initial={editingKegiatan} onCancel={() => setEditingKegiatan(null)} onSubmit={(data) => editKegiatan(editingKegiatan.id, data)} />}
+                  </div>
+                </div>
+              )}
               <div style={{ display: "flex", flexDirection: "column", gap: 12, paddingBottom: canApprove(role) ? 90 : 0 }}>
                 {kegiatan.map((k) => {
                   const { text: preview, truncated } = truncateText(k.isi, 160);
@@ -1472,7 +1919,7 @@ export default function SBTPintar() {
                     value={laporanPemasukanIPLBulanIni}
                     target={targetIPLBulanan}
                     color={COLORS.success}
-                    note={`${formatRp(IPL_PER_BULAN)} × ${warga.length} rumah`}
+                    note="total tarif rumah aktif bulan ini (normal + diskon)"
                   />
                   <PemasukanBreakdownItem
                     label="Pembayaran Tunggakan"
@@ -1482,21 +1929,13 @@ export default function SBTPintar() {
                     note="dari total tunggakan saat ini"
                   />
                   <PemasukanBreakdownItem
-                    label="Pemasukan Lainnya"
-                    value={laporanPemasukanLainnya}
+                    label="Iuran THR"
+                    value={laporanPemasukanThr}
                     target={null}
                     color={COLORS.sageDeep}
-                    note="THR / sumbangan warga — tidak ada target"
+                    note="sukarela — tidak ada target"
                   />
                 </div>
-                {showPemasukanForm && canCatatKeuangan(role) && (
-                  <div className="no-print" style={{ padding: "0 18px 18px" }}><PemasukanFormInline onCancel={() => setShowPemasukanForm(false)} onSubmit={addPemasukanLain} /></div>
-                )}
-                {canCatatKeuangan(role) && !showPemasukanForm && (
-                  <div className="no-print" style={{ padding: "0 18px 18px" }}>
-                    <Btn variant="ghost" onClick={() => setShowPemasukanForm(true)} style={{ width: "100%" }}><Plus size={14} /> Catat Pemasukan Lain (mis. Iuran THR)</Btn>
-                  </div>
-                )}
               </Card>
 
               <Card style={{ marginBottom: 20 }}>
@@ -1515,16 +1954,17 @@ export default function SBTPintar() {
               </Card>
 
               {(showExpenseForm || editingExpense) && canCatatKeuangan(role) && (
-                <div className="no-print" style={{ marginBottom: 20 }}>
+                <SimpleEditModal title={editingExpense ? "Edit Pengeluaran" : "Catat Pengeluaran"} onCancel={() => { setShowExpenseForm(false); setEditingExpense(null); }}>
                   <ExpenseFormInline
                     initial={editingExpense}
+                    posAnggaran={posAnggaran}
                     onCancel={() => { setShowExpenseForm(false); setEditingExpense(null); }}
                     onSubmit={(data) => {
                       if (editingExpense) { updateExpense(editingExpense.id, data); setEditingExpense(null); }
                       else { addExpense(data); }
                     }}
                   />
-                </div>
+                </SimpleEditModal>
               )}
 
               <Card style={{ marginBottom: 20 }}>
@@ -1583,35 +2023,35 @@ export default function SBTPintar() {
               <SectionTitle title="Kontak Darurat" />
 
               <Card style={{ marginBottom: 20 }}>
-                <div style={{ padding: "16px 20px", borderBottom: `1px solid ${COLORS.divider}`, fontWeight: 700, fontSize: 15.5 }}>Pengurus</div>
-                <div style={{ padding: "6px 18px 18px" }}>
+                <div style={{ padding: "16px 20px", borderBottom: `1px solid ${COLORS.divider}`, fontWeight: 700, fontSize: 14, textTransform: "uppercase", letterSpacing: "0.03em", color: COLORS.ink }}>Pengurus</div>
+                <div style={{ padding: "6px 18px 6px" }}>
                   {pengguna.filter((p) => p.role === "pengurus").map((p) => (
-                    <PerangkatDesaRow key={p.id} p={{ ...p, jabatan: p.jabatan || "Pengurus" }} canEdit={canKelolaAkses(role)} onEdit={setEditingWarga} onDelete={deletePengguna} />
+                    <PerangkatDesaRow key={p.id} p={{ ...p, jabatan: p.jabatan || "Pengurus" }} canEdit={false} />
                   ))}
                 </div>
                 {canKelolaAkses(role) && (
-                  <div style={{ padding: "0 18px 18px" }}>
-                    <Btn variant="ghost" onClick={() => { setAddUserDefaultRole("pengurus"); setShowAddUser(true); }} style={{ width: "100%" }}><Plus size={14} /> Tambah Pengurus</Btn>
+                  <div style={{ padding: "0 18px 16px", fontSize: 11.5, color: COLORS.inkFaint }}>
+                    Untuk tambah/ubah pengurus, kelola lewat menu <b>Warga</b> — datanya otomatis muncul di sini.
                   </div>
                 )}
               </Card>
 
               <Card style={{ marginBottom: 20 }}>
-                <div style={{ padding: "16px 20px", borderBottom: `1px solid ${COLORS.divider}`, fontWeight: 700, fontSize: 15.5 }}>Security</div>
-                <div style={{ padding: "6px 18px 18px" }}>
+                <div style={{ padding: "16px 20px", borderBottom: `1px solid ${COLORS.divider}`, fontWeight: 700, fontSize: 14, textTransform: "uppercase", letterSpacing: "0.03em", color: COLORS.ink }}>Security</div>
+                <div style={{ padding: "6px 18px 6px" }}>
                   {pengguna.filter((p) => p.role === "security").map((p) => (
-                    <PerangkatDesaRow key={p.id} p={{ ...p, jabatan: p.jabatan || "Security" }} canEdit={canKelolaAkses(role)} onEdit={setEditingWarga} onDelete={deletePengguna} />
+                    <PerangkatDesaRow key={p.id} p={{ ...p, jabatan: p.jabatan || "Security" }} canEdit={false} />
                   ))}
                 </div>
                 {canKelolaAkses(role) && (
-                  <div style={{ padding: "0 18px 18px" }}>
-                    <Btn variant="ghost" onClick={() => { setAddUserDefaultRole("security"); setShowAddUser(true); }} style={{ width: "100%" }}><Plus size={14} /> Tambah Security</Btn>
+                  <div style={{ padding: "0 18px 16px", fontSize: 11.5, color: COLORS.inkFaint }}>
+                    Untuk tambah/ubah security, kelola lewat menu <b>Warga</b> — datanya otomatis muncul di sini.
                   </div>
                 )}
               </Card>
 
               <Card style={{ marginBottom: 20 }}>
-                <div style={{ padding: "16px 20px", borderBottom: `1px solid ${COLORS.divider}`, fontWeight: 700, fontSize: 15.5 }}>Perangkat Desa &amp; Keamanan Wilayah</div>
+                <div style={{ padding: "16px 20px", borderBottom: `1px solid ${COLORS.divider}`, fontWeight: 700, fontSize: 14, textTransform: "uppercase", letterSpacing: "0.03em", color: COLORS.ink }}>Perangkat Desa &amp; Keamanan Wilayah</div>
                 <div style={{ padding: "6px 18px 18px" }}>
                   {perangkatDesa.map((p) => (
                     <PerangkatDesaRow key={p.id} p={p} canEdit={canKelolaAkses(role)} onEdit={setEditingPerangkat} onDelete={deletePerangkatDesa} />
@@ -1630,7 +2070,7 @@ export default function SBTPintar() {
               </Card>
 
               <Card style={{ marginBottom: 20 }}>
-                <div style={{ padding: "16px 20px", borderBottom: `1px solid ${COLORS.divider}`, fontWeight: 700, fontSize: 15.5 }}>Hotline Darurat Kota Bogor</div>
+                <div style={{ padding: "16px 20px", borderBottom: `1px solid ${COLORS.divider}`, fontWeight: 700, fontSize: 14, textTransform: "uppercase", letterSpacing: "0.03em", color: COLORS.ink }}>Hotline Darurat Kota Bogor</div>
                 <div style={{ padding: "6px 18px 18px" }}>
                   {kontakDarurat.map((k) => (
                     <KontakDaruratRow key={k.id} k={k} canEdit={canKelolaAkses(role)} onEdit={setEditingKontak} onDelete={deleteKontakDarurat} />
@@ -1647,30 +2087,6 @@ export default function SBTPintar() {
                   )
                 )}
               </Card>
-
-              {canKelolaAkses(role) && showAddUser && (
-                <AddUserForm
-                  warga={warga}
-                  pengguna={pengguna}
-                  jabatanOptions={jabatanOptions}
-                  onAddJabatan={addJabatanOption}
-                  onCancel={() => setShowAddUser(false)}
-                  onSubmit={addPengguna}
-                  defaultRole={addUserDefaultRole}
-                />
-              )}
-              {editingWarga && (
-                <EditWargaModal
-                  data={editingWarga}
-                  warga={warga}
-                  pengguna={pengguna}
-                  jabatanOptions={jabatanOptions}
-                  onAddJabatan={addJabatanOption}
-                  onResetPin={resetPinWarga}
-                  onCancel={() => setEditingWarga(null)}
-                  onSubmit={(changes) => { updateWargaLengkap(editingWarga.id, changes); setEditingWarga(null); }}
-                />
-              )}
 
               {editingKontak && (
                 <SimpleEditModal title="Edit Kontak Darurat" onCancel={() => setEditingKontak(null)}>
@@ -1706,25 +2122,20 @@ export default function SBTPintar() {
                 </Card>
               )}
 
-              {canKelolaAkses(role) && (
-                <JabatanOptionsManager
-                  jabatanOptions={jabatanOptions}
-                  onAdd={addJabatanOption}
-                  onRename={renameJabatanOption}
-                  onDelete={deleteJabatanOption}
-                />
-              )}
-
               {canKelolaAkses(role) && showAddUser && (
-                <AddUserForm
-                  warga={warga}
-                  pengguna={pengguna}
-                  jabatanOptions={jabatanOptions}
-                  onAddJabatan={addJabatanOption}
-                  onCancel={() => setShowAddUser(false)}
-                  onSubmit={addPengguna}
-                  defaultRole={addUserDefaultRole}
-                />
+                <div style={{ position: "fixed", inset: 0, background: "rgba(29,29,31,0.5)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 80, padding: 16 }}>
+                  <div style={{ width: "100%", maxWidth: 420, maxHeight: "88vh", overflowY: "auto" }}>
+                    <AddUserForm
+                      warga={warga}
+                      pengguna={pengguna}
+                      jabatanOptions={jabatanOptions}
+                      onAddJabatan={addJabatanOption}
+                      onCancel={() => setShowAddUser(false)}
+                      onSubmit={addPengguna}
+                      defaultRole={addUserDefaultRole}
+                    />
+                  </div>
+                </div>
               )}
 
               <div style={{ display: "flex", flexDirection: "column", gap: 14, paddingBottom: canKelolaAkses(role) ? 90 : 0 }}>
@@ -1736,6 +2147,7 @@ export default function SBTPintar() {
                     canEdit={canKelolaAkses(role)}
                     onEdit={setEditingWarga}
                     onDelete={deletePengguna}
+                    onKelolaIPL={setKelolaIPLRumah}
                   />
                 ))}
 
@@ -1760,6 +2172,14 @@ export default function SBTPintar() {
                 />
               )}
 
+              {kelolaIPLRumah && (
+                <RiwayatIPLModal
+                  rumah={kelolaIPLRumah}
+                  onClose={() => setKelolaIPLRumah(null)}
+                  onTambahPeriode={tambahPeriodeIPLWarga}
+                />
+              )}
+
               {canKelolaAkses(role) && (
                 <div className="fab-btn">
                   <Btn pill onClick={() => { setAddUserDefaultRole("warga"); setShowAddUser(true); }} style={{ boxShadow: "0 10px 24px rgba(228,113,30,0.35)", fontSize: 15, padding: "13px 22px" }}>
@@ -1767,6 +2187,41 @@ export default function SBTPintar() {
                   </Btn>
                 </div>
               )}
+            </>
+          )}
+
+          {tab === "setting" && canKelolaAkses(role) && (
+            <>
+              <SectionTitle title="Setting" subtitle="Semua kelola & konfigurasi aplikasi, dikumpulkan di sini" />
+
+              <div style={{ marginBottom: 18 }}>
+                <CollapsibleCard title="Kelola Pos Anggaran" subtitle="Atur grup, pos, pagu & sub-kategori — sekaligus jadi pilihan kategori transaksi" defaultOpen={false}>
+                  <PosAnggaranManager
+                    posAnggaran={posAnggaran}
+                    onAddPos={addPos}
+                    onRenamePos={renamePos}
+                    onDeletePos={deletePos}
+                    onAddSub={addSubPos}
+                    onDeleteSub={deleteSubPos}
+                    onUpdatePagu={updatePagu}
+                  />
+                </CollapsibleCard>
+              </div>
+
+              <CollapsibleCard title="Kelola Daftar Pengurus" subtitle="Atur daftar jabatan/status pengurus" defaultOpen={false}>
+                <JabatanOptionsManager
+                  jabatanOptions={jabatanOptions}
+                  onAdd={addJabatanOption}
+                  onRename={renameJabatanOption}
+                  onDelete={deleteJabatanOption}
+                />
+              </CollapsibleCard>
+
+              <div style={{ marginTop: 18 }}>
+                <CollapsibleCard title="Kelola Periode THR" subtitle="Atur bulan & tahun iuran THR tahun berjalan (sukarela)" defaultOpen={false}>
+                  <ThrConfigManager thrConfig={thrConfig} onUpdate={updateThrConfig} />
+                </CollapsibleCard>
+              </div>
             </>
           )}
         </main>
@@ -1780,6 +2235,14 @@ export default function SBTPintar() {
           onSubmit={(monthKeys, dataUrl) => { uploadBuktiBanyakBulan(myWarga.id, monthKeys, dataUrl); setShowPayModal(false); }}
         />
       )}
+      {showPayThrModal && myWarga && (
+        <PayThrModal
+          myWarga={myWarga}
+          thrConfig={thrConfig}
+          onCancel={() => setShowPayThrModal(false)}
+          onSubmit={(jumlah, dataUrl) => { uploadBuktiThr(myWarga.id, thrConfig.tahun, jumlah, dataUrl); setShowPayThrModal(false); }}
+        />
+      )}
       {cellModal && (
         <IuranCellModal
           data={cellModal}
@@ -1787,6 +2250,16 @@ export default function SBTPintar() {
           onClose={() => setCellModal(null)}
           onVerifikasi={(bukti) => { verifikasiLunas(cellModal.warga.id, cellModal.monthKey, bukti); setCellModal(null); }}
           onBatalkan={() => { batalkanStatus(cellModal.warga.id, cellModal.monthKey); setCellModal(null); }}
+        />
+      )}
+      {thrCellModal && (
+        <ThrCellModal
+          data={thrCellModal}
+          thrConfig={thrConfig}
+          canVerifikasi={canVerifikasi(role)}
+          onClose={() => setThrCellModal(null)}
+          onVerifikasi={(jumlah) => { verifikasiThrLunas(thrCellModal.warga.id, thrConfig.tahun, jumlah); setThrCellModal(null); }}
+          onBatalkan={() => { batalkanThr(thrCellModal.warga.id, thrConfig.tahun); setThrCellModal(null); }}
         />
       )}
       {kegiatanDetail && (
@@ -1803,7 +2276,7 @@ export default function SBTPintar() {
 // ============================================================
 // Iuran IPL — tampilan Warga (mirip riwayat tagihan)
 // ============================================================
-function WargaIuranView({ myWarga, onOpenPay }) {
+function WargaIuranView({ myWarga, onOpenPay, onOpenPayThr, thrConfig }) {
   if (!myWarga) {
     return (
       <>
@@ -1812,13 +2285,20 @@ function WargaIuranView({ myWarga, onOpenPay }) {
       </>
     );
   }
-  const rows = months12Desc.map((mk) => ({ monthKey: mk, ...myWarga.statusBayar[mk] }));
-  const belumCount = rows.filter((r) => r.status === "belum").length;
-  const totalTunggakan = belumCount * myWarga.iplPerBulan;
+  const rows = months12Desc.map((mk) => ({ type: "ipl", monthKey: mk, tagihan: getTagihanBulan(myWarga, mk), ...myWarga.statusBayar[mk] }));
+  const thrEntry = myWarga.thr?.[thrConfig.tahun];
+  const thrIdx = months12Desc.indexOf(thrConfig.bulan);
+  if (thrConfig.aktif && thrIdx !== -1) {
+    rows.splice(thrIdx, 0, { type: "thr", monthKey: `${thrConfig.bulan}-thr`, tahun: thrConfig.tahun, status: thrEntry?.status || "belum", jumlah: thrEntry?.jumlah || 0 });
+  }
+  const belumCount = rows.filter((r) => r.type === "ipl" && r.tagihan.status === "aktif" && r.status === "belum").length;
+  const totalTunggakan = rows.filter((r) => r.type === "ipl" && r.tagihan.status === "aktif" && r.status === "belum").reduce((s, r) => s + r.tagihan.tarif, 0);
+  const thrBelum = thrConfig.aktif && (!thrEntry || thrEntry.status === "belum");
+  const tagihanBulanIni = getTagihanBulan(myWarga, currentMonthKey);
 
   return (
     <>
-      <SectionTitle title="Iuran IPL Saya" subtitle={`${myWarga.noRumah} · ${formatRp(myWarga.iplPerBulan)}/bulan`} />
+      <SectionTitle title="Iuran IPL Saya" subtitle={tagihanBulanIni.status === "aktif" ? `${myWarga.noRumah} · ${formatRp(tagihanBulanIni.tarif)}/bulan${tagihanBulanIni.tarif < IPL_PER_BULAN ? " (diskon)" : ""}` : `${myWarga.noRumah} · Tidak aktif bulan ini`} />
       <Card style={{ padding: 20, marginBottom: 18, display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 10 }}>
         <div>
           <div style={{ fontSize: 12.5, color: COLORS.inkSoft, fontWeight: 600 }}>{belumCount === 0 ? "Status Pembayaran" : "Total Tunggakan"}</div>
@@ -1832,11 +2312,30 @@ function WargaIuranView({ myWarga, onOpenPay }) {
       <Card style={{ paddingBottom: 90 }}>
         <div style={{ padding: "16px 20px", borderBottom: `1px solid ${COLORS.divider}`, fontWeight: 700, fontSize: 15.5 }}>Riwayat Tagihan</div>
         <div>
-          {rows.map((r) => (
+          {rows.map((r) => r.type === "thr" ? (
+            <div key={r.monthKey} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "14px 20px", borderBottom: `1px solid ${COLORS.divider}`, background: COLORS.sageSoft }}>
+              <div>
+                <div style={{ fontWeight: 600, fontSize: 14, display: "flex", alignItems: "center", gap: 6 }}>
+                  Iuran THR {r.tahun}
+                  <span style={{ fontSize: 10, fontWeight: 700, color: COLORS.sageDeep, background: "#fff", padding: "2px 6px", borderRadius: 999 }}>SUKARELA</span>
+                </div>
+                <div className="mono" style={{ fontSize: 12.5, color: COLORS.inkSoft, marginTop: 2 }}>{r.jumlah > 0 ? formatRp(r.jumlah) : "Nominal bebas, sesuai kemampuan"}</div>
+              </div>
+              <StatusBadge status={r.status} />
+            </div>
+          ) : r.tagihan.status === "nonaktif" ? (
+            <div key={r.monthKey} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "14px 20px", borderBottom: `1px solid ${COLORS.divider}`, opacity: 0.6 }}>
+              <div>
+                <div style={{ fontWeight: 600, fontSize: 14 }}>{monthLabel(r.monthKey)}</div>
+                <div style={{ fontSize: 12, color: COLORS.inkFaint, marginTop: 2 }}>Tidak ada kewajiban bulan ini</div>
+              </div>
+              <span style={{ fontSize: 11, fontWeight: 700, color: COLORS.inkFaint, background: COLORS.bg, padding: "4px 10px", borderRadius: 999 }}>TIDAK AKTIF</span>
+            </div>
+          ) : (
             <div key={r.monthKey} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "14px 20px", borderBottom: `1px solid ${COLORS.divider}` }}>
               <div>
                 <div style={{ fontWeight: 600, fontSize: 14 }}>{monthLabel(r.monthKey)}</div>
-                <div className="mono" style={{ fontSize: 12.5, color: COLORS.inkSoft, marginTop: 2 }}>{formatRp(myWarga.iplPerBulan)}</div>
+                <div className="mono" style={{ fontSize: 12.5, color: COLORS.inkSoft, marginTop: 2 }}>{formatRp(r.tagihan.tarif)}{r.tagihan.tarif < IPL_PER_BULAN ? " (diskon)" : ""}</div>
               </div>
               <StatusBadge status={r.status} />
             </div>
@@ -1844,25 +2343,97 @@ function WargaIuranView({ myWarga, onOpenPay }) {
         </div>
       </Card>
 
-      {belumCount > 0 && (
-        <div className="fab-btn">
-          <Btn pill onClick={onOpenPay} style={{ boxShadow: "0 10px 24px rgba(0,113,227,0.35)", fontSize: 15, padding: "13px 22px" }}>
-            <Wallet size={16} /> Bayar IPL
-          </Btn>
+      {(belumCount > 0 || thrBelum) && (
+        <div className="fab-btn" style={{ display: "flex", flexDirection: "column", gap: 10, alignItems: "flex-end" }}>
+          {thrBelum && (
+            <Btn pill onClick={onOpenPayThr} variant="success" style={{ boxShadow: "0 10px 24px rgba(58,140,90,0.35)", fontSize: 14, padding: "12px 20px" }}>
+              <Wallet size={15} /> Ikut Iuran THR
+            </Btn>
+          )}
+          {belumCount > 0 && (
+            <Btn pill onClick={onOpenPay} style={{ boxShadow: "0 10px 24px rgba(0,113,227,0.35)", fontSize: 15, padding: "13px 22px" }}>
+              <Wallet size={16} /> Bayar IPL
+            </Btn>
+          )}
         </div>
       )}
     </>
   );
 }
 
+function ThrConfigManager({ thrConfig, onUpdate }) {
+  const [tahun, setTahun] = useState(thrConfig.tahun);
+  const [bulan, setBulan] = useState(thrConfig.bulan);
+  const [aktif, setAktif] = useState(thrConfig.aktif);
+
+  function simpan() {
+    onUpdate({ tahun, bulan, aktif });
+  }
+
+  return (
+    <div style={{ display: "grid", gap: 14 }}>
+      <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, cursor: "pointer" }}>
+        <input type="checkbox" checked={aktif} onChange={(e) => setAktif(e.target.checked)} style={{ width: 16, height: 16, accentColor: COLORS.accent }} />
+        Aktifkan Iuran THR tahun ini
+      </label>
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+        <Field label="Tahun"><input value={tahun} onChange={(e) => setTahun(e.target.value)} placeholder="2026" style={inputStyle} /></Field>
+        <Field label="Bulan THR"><input type="month" value={bulan} onChange={(e) => setBulan(e.target.value)} style={inputStyle} /></Field>
+      </div>
+      <div style={{ fontSize: 11.5, color: COLORS.inkFaint }}>Bulan ini yang menentukan posisi "Iuran THR" muncul di riwayat tagihan warga & daftar verifikasi pengurus. Ganti tiap tahun mengikuti kalender Lebaran.</div>
+      <Btn onClick={simpan} style={{ width: "fit-content" }}>Simpan Periode THR</Btn>
+    </div>
+  );
+}
+
+function PayThrModal({ myWarga, thrConfig, onCancel, onSubmit }) {
+  const [jumlah, setJumlah] = useState("");
+  const [preview, setPreview] = useState(null);
+
+  function handleSubmit(e) {
+    e.preventDefault();
+    if (!jumlah || Number(jumlah) <= 0) return;
+    onSubmit(Number(jumlah), preview);
+  }
+
+  return (
+    <div style={{ position: "fixed", inset: 0, background: "rgba(29,29,31,0.5)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 80, padding: 16 }}>
+      <Card style={{ padding: 22, maxWidth: 420, width: "100%" }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
+        <div style={{ fontWeight: 700, fontSize: 17 }}>Ikut Iuran THR {thrConfig.tahun}</div>
+        <button onClick={onCancel} style={{ background: COLORS.bg, border: "none", borderRadius: 999, width: 30, height: 30, cursor: "pointer", color: COLORS.inkSoft, display: "flex", alignItems: "center", justifyContent: "center" }}><X size={16} /></button>
+      </div>
+      <div style={{ fontSize: 12.5, color: COLORS.inkSoft, marginBottom: 16 }}>Sifatnya sukarela — isi sesuai kemampuan, tidak ada nominal wajib.</div>
+      <form onSubmit={handleSubmit} style={{ display: "grid", gap: 14 }}>
+        <Field label="Nominal (Rp)"><input type="number" value={jumlah} onChange={(e) => setJumlah(e.target.value)} placeholder="mis. 50000" style={inputStyle} autoFocus /></Field>
+        <Field label="Bukti Transfer (opsional)">
+          <label style={{ display: "flex", alignItems: "center", gap: 8, padding: "10px 12px", border: `1px dashed ${COLORS.divider}`, borderRadius: 10, cursor: "pointer", fontSize: 12.5, color: COLORS.inkSoft }}>
+            <Upload size={15} />
+            {preview ? "Bukti terpilih ✓" : "Pilih foto bukti transfer"}
+            <input type="file" accept="image/*" style={{ display: "none" }} onChange={(e) => {
+              const file = e.target.files?.[0]; if (!file) return;
+              const reader = new FileReader();
+              reader.onload = () => setPreview(reader.result);
+              reader.readAsDataURL(file);
+            }} />
+          </label>
+        </Field>
+        <Btn type="submit" variant="success">Kirim Konfirmasi</Btn>
+      </form>
+      </Card>
+    </div>
+  );
+}
+
 function PayIPLModal({ myWarga, onCancel, onSubmit }) {
   // urut dari yang PALING LAMA menunggak -> paling baru, supaya pembayaran
   // wajib dilunasi berurutan dari tunggakan tertua (tidak boleh loncat bulan)
-  const unpaidMonths = months12Asc.filter((mk) => myWarga.statusBayar[mk]?.status === "belum");
+  // — bulan dengan status rumah "nonaktif" dilewati, tidak ada kewajiban
+  const unpaidMonths = months12Asc.filter((mk) => getTagihanBulan(myWarga, mk).status === "aktif" && myWarga.statusBayar[mk]?.status === "belum");
   // selectedCount = jumlah bulan (dihitung dari yang tertua) yang akan dibayar
   const [selectedCount, setSelectedCount] = useState(unpaidMonths.length);
   const [preview, setPreview] = useState(null);
-  const total = selectedCount * myWarga.iplPerBulan;
+  const total = unpaidMonths.slice(0, selectedCount).reduce((s, mk) => s + getTagihanBulan(myWarga, mk).tarif, 0);
 
   // Ketuk salah satu baris untuk menentukan "dibayar sampai bulan ini" —
   // semua bulan yang lebih lama otomatis ikut tercentang, tidak bisa pilih acak/loncat.
@@ -1892,7 +2463,7 @@ function PayIPLModal({ myWarga, onCancel, onSubmit }) {
                   <input type="checkbox" checked={checked} readOnly style={{ width: 17, height: 17, accentColor: COLORS.accent, pointerEvents: "none" }} />
                   <span style={{ fontWeight: 600, fontSize: 13.5 }}>{monthLabel(mk)}</span>
                 </span>
-                <span className="mono" style={{ fontSize: 13, color: COLORS.inkSoft }}>{formatRp(myWarga.iplPerBulan)}</span>
+                <span className="mono" style={{ fontSize: 13, color: COLORS.inkSoft }}>{formatRp(getTagihanBulan(myWarga, mk).tarif)}</span>
               </label>
             );
           })}
@@ -1940,17 +2511,19 @@ function PayIPLModal({ myWarga, onCancel, onSubmit }) {
 function IuranCellModal({ data, canVerifikasi, onClose, onVerifikasi, onBatalkan }) {
   const { warga: w, monthKey, kontakUtama } = data;
   const entry = w.statusBayar[monthKey] || { status: "belum", bukti: null };
+  const tarifBulanIni = getTagihanBulan(w, monthKey).tarif;
   const [buktiManual, setBuktiManual] = useState(null);
   const namaTampil = kontakUtama ? kontakUtama.nama : w.noRumah;
 
   // seluruh bulan yang masih menunggak untuk warga ini (bukan cuma bulan yang diketuk),
-  // supaya pengurus bisa kirim 1 pengingat untuk semua tunggakan sekaligus
-  const semuaBulanMenunggak = months12Asc.filter((mk) => w.statusBayar[mk]?.status === "belum");
-  const totalTunggakan = semuaBulanMenunggak.length * w.iplPerBulan;
+  // supaya pengurus bisa kirim 1 pengingat untuk semua tunggakan sekaligus — bulan
+  // "nonaktif" dilewati karena memang tidak ada kewajiban
+  const semuaBulanMenunggak = months12Asc.filter((mk) => getTagihanBulan(w, mk).status === "aktif" && w.statusBayar[mk]?.status === "belum");
+  const totalTunggakan = semuaBulanMenunggak.reduce((s, mk) => s + getTagihanBulan(w, mk).tarif, 0);
   const daftarBulanMenunggak = semuaBulanMenunggak.map(monthLabel).join(", ");
 
   const waTextSatuBulan = `Assalamualaikum Bpk/Ibu ${namaTampil},
-mengingatkan iuran IPL ${monthLabel(monthKey)} sebesar ${formatRp(w.iplPerBulan)} belum kami terima.
+mengingatkan iuran IPL ${monthLabel(monthKey)} sebesar ${formatRp(tarifBulanIni)} belum kami terima.
 Mohon dapat diselesaikan.
 
 ${REKENING_IPL.bank}
@@ -1981,7 +2554,7 @@ Terima kasih, 🙏 — Pengurus.`;
 
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 16 }}>
           <StatusBadge status={entry.status} />
-          <span className="mono" style={{ fontWeight: 600, fontSize: 14 }}>{formatRp(w.iplPerBulan)}</span>
+          <span className="mono" style={{ fontWeight: 600, fontSize: 14 }}>{formatRp(tarifBulanIni)}{tarifBulanIni < IPL_PER_BULAN ? " (diskon)" : ""}</span>
         </div>
 
         {entry.bukti && (
@@ -2030,6 +2603,70 @@ Terima kasih, 🙏 — Pengurus.`;
               <Btn variant="ghost" style={{ width: "100%", padding: "11px 0" }}><Send size={14} /> Ingatkan {monthLabel(monthKey)} Saja</Btn>
             </a>
           )}
+          {entry.status !== "belum" && canVerifikasi && (
+            <Btn variant="ghost" onClick={onBatalkan} style={{ width: "100%", padding: "11px 0" }}>Batalkan Status</Btn>
+          )}
+        </div>
+      </Card>
+    </div>
+  );
+}
+
+function ThrCellModal({ data, thrConfig, canVerifikasi, onClose, onVerifikasi, onBatalkan }) {
+  const { warga: w, kontakUtama } = data;
+  const entry = w.thr?.[thrConfig.tahun] || { status: "belum", jumlah: 0, bukti: null };
+  const [jumlahManual, setJumlahManual] = useState("");
+  const [buktiManual, setBuktiManual] = useState(null);
+  const namaTampil = kontakUtama ? kontakUtama.nama : w.noRumah;
+
+  return (
+    <div style={{ position: "fixed", inset: 0, background: "rgba(29,29,31,0.5)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 80, padding: 16 }}>
+      <Card style={{ padding: 22, maxWidth: 360, width: "100%", maxHeight: "88vh", overflowY: "auto" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
+          <div>
+            <div style={{ fontWeight: 700, fontSize: 16.5 }}>{namaTampil}</div>
+            <div style={{ fontSize: 12.5, color: COLORS.inkSoft }}>{w.noRumah} · Iuran THR {thrConfig.tahun} <span style={{ color: COLORS.sageDeep, fontWeight: 600 }}>(Sukarela)</span></div>
+          </div>
+          <button onClick={onClose} style={{ background: COLORS.bg, border: "none", borderRadius: 999, width: 30, height: 30, cursor: "pointer", color: COLORS.inkSoft, display: "flex", alignItems: "center", justifyContent: "center" }}><X size={16} /></button>
+        </div>
+
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 16 }}>
+          <StatusBadge status={entry.status} />
+          <span className="mono" style={{ fontWeight: 600, fontSize: 14 }}>{entry.jumlah > 0 ? formatRp(entry.jumlah) : "—"}</span>
+        </div>
+
+        {entry.bukti && (
+          <img src={entry.bukti} alt="Bukti transfer" onClick={() => window.open(entry.bukti, "_blank")} style={{ width: "100%", borderRadius: 10, marginBottom: 16, cursor: "pointer" }} />
+        )}
+
+        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+          {entry.status === "menunggu" && canVerifikasi && (
+            <Btn variant="success" onClick={() => onVerifikasi(null)} style={{ width: "100%", padding: "11px 0" }}><CheckCircle2 size={15} /> Verifikasi ({formatRp(entry.jumlah)})</Btn>
+          )}
+
+          {entry.status === "belum" && canVerifikasi && (
+            <div style={{ border: `1px dashed ${COLORS.divider}`, borderRadius: 12, padding: 12, background: COLORS.bg }}>
+              <div style={{ fontSize: 12, color: COLORS.inkSoft, marginBottom: 8 }}>
+                Kalau warga sudah kasih THR langsung (tunai/WA), catat di sini — sukarela, isi sesuai yang diterima:
+              </div>
+              <input type="number" value={jumlahManual} onChange={(e) => setJumlahManual(e.target.value)} placeholder="Nominal (Rp)" style={{ ...inputStyle, width: "100%", marginBottom: 10 }} />
+              <label style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 10px", borderRadius: 8, background: COLORS.card, border: `1px solid ${COLORS.divider}`, cursor: "pointer", marginBottom: 10, fontSize: 12.5 }}>
+                <Upload size={14} color={COLORS.inkSoft} />
+                {buktiManual ? "Bukti terpilih ✓ (ganti foto)" : "Upload bukti (opsional)"}
+                <input type="file" accept="image/*" style={{ display: "none" }} onChange={(e) => {
+                  const file = e.target.files?.[0]; if (!file) return;
+                  const reader = new FileReader();
+                  reader.onload = () => setBuktiManual(reader.result);
+                  reader.readAsDataURL(file);
+                }} />
+              </label>
+              {buktiManual && <img src={buktiManual} alt="Bukti manual" style={{ width: "100%", borderRadius: 8, marginBottom: 10 }} />}
+              <Btn variant="success" disabled={!jumlahManual || Number(jumlahManual) <= 0} onClick={() => onVerifikasi(Number(jumlahManual))} style={{ width: "100%", padding: "10px 0" }}>
+                <CheckCircle2 size={15} /> Tandai Ikut Serta
+              </Btn>
+            </div>
+          )}
+
           {entry.status !== "belum" && canVerifikasi && (
             <Btn variant="ghost" onClick={onBatalkan} style={{ width: "100%", padding: "11px 0" }}>Batalkan Status</Btn>
           )}
@@ -2165,7 +2802,13 @@ function AbsensiSecurityView({ absensiSecurity, role, namaAktif, onSubmit }) {
         subtitle="Laporan kondisi jaga, 1x per shift"
       />
 
-      {showForm && <AbsensiForm namaAktif={namaAktif} onCancel={() => setShowForm(false)} onSubmit={(data) => { onSubmit(data); setShowForm(false); }} />}
+      {showForm && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(29,29,31,0.5)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 80, padding: 16 }}>
+          <div style={{ width: "100%", maxWidth: 420, maxHeight: "88vh", overflowY: "auto" }}>
+            <AbsensiForm namaAktif={namaAktif} onCancel={() => setShowForm(false)} onSubmit={(data) => { onSubmit(data); setShowForm(false); }} />
+          </div>
+        </div>
+      )}
 
       <div style={{ display: "flex", flexWrap: "wrap", gap: 14, marginBottom: 14, fontSize: 12, color: COLORS.inkSoft }}>
         <span style={{ display: "flex", alignItems: "center", gap: 5 }}><span style={{ width: 10, height: 10, borderRadius: 3, background: COLORS.success }} />Aman</span>
@@ -2234,45 +2877,36 @@ function AbsensiSecurityView({ absensiSecurity, role, namaAktif, onSubmit }) {
 // komponen lain
 // ============================================================
 function JabatanOptionsManager({ jabatanOptions, onAdd, onRename, onDelete }) {
-  const [open, setOpen] = useState(false);
   const [newLabel, setNewLabel] = useState("");
   const [editing, setEditing] = useState(null);
   const [editValue, setEditValue] = useState("");
 
   return (
-    <Card style={{ padding: 16, marginBottom: 18 }}>
-      <button onClick={() => setOpen(!open)} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", width: "100%", background: "none", border: "none", cursor: "pointer", padding: 0, fontWeight: 700, fontSize: 14 }}>
-        Kelola Daftar Jabatan
-        <span style={{ fontSize: 12, color: COLORS.accent, fontWeight: 600 }}>{open ? "Sembunyikan" : "Buka"}</span>
-      </button>
-      {open && (
-        <div style={{ marginTop: 14 }}>
-          <div style={{ display: "flex", flexDirection: "column", gap: 6, marginBottom: 12 }}>
-            {jabatanOptions.map((s) => (
-              <div key={s} style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                {editing === s ? (
-                  <>
-                    <input value={editValue} onChange={(e) => setEditValue(e.target.value)} style={{ ...inputStyle, padding: "6px 8px", fontSize: 12.5, flex: 1 }} />
-                    <Btn onClick={() => { onRename(s, editValue); setEditing(null); }} style={{ padding: "5px 10px", fontSize: 11.5 }}>Simpan</Btn>
-                    <Btn variant="ghost" onClick={() => setEditing(null)} style={{ padding: "5px 10px", fontSize: 11.5 }}>Batal</Btn>
-                  </>
-                ) : (
-                  <>
-                    <span style={{ flex: 1, fontSize: 13 }}>{s}</span>
-                    <button onClick={() => { setEditing(s); setEditValue(s); }} aria-label="Edit" style={{ background: COLORS.bg, border: "none", borderRadius: 999, width: 26, height: 26, cursor: "pointer", color: COLORS.inkSoft, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}><Pencil size={11} /></button>
-                    <button onClick={() => onDelete(s)} aria-label="Hapus" style={{ background: COLORS.dangerSoft, border: "none", borderRadius: 999, width: 26, height: 26, cursor: "pointer", color: COLORS.danger, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}><Trash2 size={11} /></button>
-                  </>
-                )}
-              </div>
-            ))}
+    <div>
+      <div style={{ display: "flex", flexDirection: "column", gap: 6, marginBottom: 12 }}>
+        {jabatanOptions.map((s) => (
+          <div key={s} style={{ display: "flex", alignItems: "center", gap: 6 }}>
+            {editing === s ? (
+              <>
+                <input value={editValue} onChange={(e) => setEditValue(e.target.value)} style={{ ...inputStyle, padding: "6px 8px", fontSize: 12.5, flex: 1 }} />
+                <Btn onClick={() => { onRename(s, editValue); setEditing(null); }} style={{ padding: "5px 10px", fontSize: 11.5 }}>Simpan</Btn>
+                <Btn variant="ghost" onClick={() => setEditing(null)} style={{ padding: "5px 10px", fontSize: 11.5 }}>Batal</Btn>
+              </>
+            ) : (
+              <>
+                <span style={{ flex: 1, fontSize: 13 }}>{s}</span>
+                <button onClick={() => { setEditing(s); setEditValue(s); }} aria-label="Edit" style={{ background: COLORS.bg, border: "none", borderRadius: 999, width: 26, height: 26, cursor: "pointer", color: COLORS.inkSoft, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}><Pencil size={11} /></button>
+                <button onClick={() => onDelete(s)} aria-label="Hapus" style={{ background: COLORS.dangerSoft, border: "none", borderRadius: 999, width: 26, height: 26, cursor: "pointer", color: COLORS.danger, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}><Trash2 size={11} /></button>
+              </>
+            )}
           </div>
-          <div style={{ display: "flex", gap: 6 }}>
-            <input value={newLabel} onChange={(e) => setNewLabel(e.target.value)} placeholder="Tambah status baru" style={{ ...inputStyle, padding: "8px 10px", fontSize: 12.5, flex: 1 }} />
-            <Btn onClick={() => { onAdd(newLabel); setNewLabel(""); }} style={{ padding: "8px 14px", fontSize: 12.5 }}><Plus size={13} /> Tambah</Btn>
-          </div>
-        </div>
-      )}
-    </Card>
+        ))}
+      </div>
+      <div style={{ display: "flex", gap: 6 }}>
+        <input value={newLabel} onChange={(e) => setNewLabel(e.target.value)} placeholder="Tambah status baru" style={{ ...inputStyle, padding: "8px 10px", fontSize: 12.5, flex: 1 }} />
+        <Btn onClick={() => { onAdd(newLabel); setNewLabel(""); }} style={{ padding: "8px 14px", fontSize: 12.5 }}><Plus size={13} /> Tambah</Btn>
+      </div>
+    </div>
   );
 }
 
@@ -2341,10 +2975,25 @@ function ResidentRow({ p, canEdit, onEdit, onDelete }) {
   );
 }
 
-function RumahCard({ rumah, penghuni, canEdit, onEdit, onDelete }) {
+function RumahCard({ rumah, penghuni, canEdit, onEdit, onDelete, onKelolaIPL }) {
+  const tagihanBulanIni = getTagihanBulan(rumah, currentMonthKey);
+  const badge = tagihanBulanIni.status === "nonaktif"
+    ? { label: "Tidak Aktif", bg: COLORS.divider, fg: COLORS.inkFaint }
+    : tagihanBulanIni.tarif < IPL_PER_BULAN
+    ? { label: "Diskon", bg: COLORS.warningSoft, fg: COLORS.warning }
+    : { label: "Normal", bg: COLORS.successSoft, fg: COLORS.success };
   return (
     <Card style={{ padding: 18 }}>
-      <div style={{ fontWeight: 700, fontSize: 15.5, marginBottom: 12 }}>{rumah.noRumah}</div>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12, gap: 8 }}>
+        <div style={{ fontWeight: 700, fontSize: 15.5 }}>{rumah.noRumah}</div>
+        {canEdit ? (
+          <button onClick={() => onKelolaIPL(rumah)} style={{ display: "flex", alignItems: "center", gap: 5, background: badge.bg, color: badge.fg, border: "none", borderRadius: 999, padding: "5px 10px", fontSize: 11, fontWeight: 700, cursor: "pointer", flexShrink: 0 }}>
+            IPL: {badge.label} <Pencil size={10} />
+          </button>
+        ) : (
+          <span style={{ background: badge.bg, color: badge.fg, borderRadius: 999, padding: "5px 10px", fontSize: 11, fontWeight: 700, flexShrink: 0 }}>IPL: {badge.label}</span>
+        )}
+      </div>
       <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
         {penghuni.length === 0 && <div style={{ fontSize: 12.5, color: COLORS.inkFaint }}>Belum ada penghuni terdaftar.</div>}
         {penghuni.map((p) => (
@@ -2352,6 +3001,59 @@ function RumahCard({ rumah, penghuni, canEdit, onEdit, onDelete }) {
         ))}
       </div>
     </Card>
+  );
+}
+
+function RiwayatIPLModal({ rumah, onClose, onTambahPeriode }) {
+  const [status, setStatus] = useState("aktif");
+  const [tarifPilihan, setTarifPilihan] = useState("normal");
+  const [dariBulan, setDariBulan] = useState(currentMonthKey);
+  const riwayat = rumah.riwayatIPL && rumah.riwayatIPL.length > 0 ? rumah.riwayatIPL : [{ dari: null, sampai: null, status: "aktif", tarif: rumah.iplPerBulan || IPL_PER_BULAN }];
+
+  function submit() {
+    const tarif = status === "nonaktif" ? 0 : (tarifPilihan === "diskon" ? IPL_DISKON : IPL_PER_BULAN);
+    onTambahPeriode(rumah.id, { dari: dariBulan, sampai: null, status, tarif });
+    onClose();
+  }
+
+  return (
+    <SimpleEditModal title={`Kelola Status IPL — ${rumah.noRumah}`} onCancel={onClose}>
+      <div style={{ marginBottom: 18 }}>
+        <div style={{ fontWeight: 600, fontSize: 12.5, marginBottom: 8, color: COLORS.inkSoft }}>Riwayat</div>
+        <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+          {[...riwayat].reverse().map((p, idx) => (
+            <div key={p.id || idx} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: 12.5, padding: "9px 11px", background: COLORS.bg, borderRadius: 8 }}>
+              <span>{p.dari ? monthLabel(p.dari) : "Awal"} – {p.sampai ? monthLabel(p.sampai) : "Sekarang"}</span>
+              <span style={{ fontWeight: 700, color: p.status === "nonaktif" ? COLORS.inkFaint : (p.tarif < IPL_PER_BULAN ? COLORS.warning : COLORS.success) }}>
+                {p.status === "nonaktif" ? "Tidak Aktif" : `${formatRp(p.tarif)}${p.tarif < IPL_PER_BULAN ? " (diskon)" : ""}`}
+              </span>
+            </div>
+          ))}
+        </div>
+      </div>
+      <div style={{ borderTop: `1px dashed ${COLORS.divider}`, paddingTop: 16 }}>
+        <div style={{ fontWeight: 600, fontSize: 12.5, marginBottom: 10 }}>Tambah Perubahan Status</div>
+        <div style={{ display: "grid", gap: 12 }}>
+          <Field label="Berlaku Mulai Bulan"><input type="month" value={dariBulan} onChange={(e) => setDariBulan(e.target.value)} style={inputStyle} /></Field>
+          <Field label="Status">
+            <select value={status} onChange={(e) => setStatus(e.target.value)} style={inputStyle}>
+              <option value="aktif">Aktif (ada kewajiban IPL)</option>
+              <option value="nonaktif">Tidak Aktif (tidak ada kewajiban)</option>
+            </select>
+          </Field>
+          {status === "aktif" && (
+            <Field label="Tarif">
+              <select value={tarifPilihan} onChange={(e) => setTarifPilihan(e.target.value)} style={inputStyle}>
+                <option value="normal">Normal — {formatRp(IPL_PER_BULAN)}</option>
+                <option value="diskon">Diskon — {formatRp(IPL_DISKON)}</option>
+              </select>
+            </Field>
+          )}
+          <div style={{ fontSize: 11, color: COLORS.inkFaint }}>Periode yang masih berjalan otomatis ditutup pas bulan sebelum tanggal mulai di atas.</div>
+          <Btn onClick={submit}>Simpan Perubahan Status</Btn>
+        </div>
+      </div>
+    </SimpleEditModal>
   );
 }
 
@@ -2393,67 +3095,38 @@ function FormShell({ title, onCancel, onSubmit, children }) {
   );
 }
 
-function ExpenseFormInline({ onCancel, onSubmit, initial }) {
+function ExpenseFormInline({ onCancel, onSubmit, initial, posAnggaran }) {
+  const kategoriList = getKategoriList(posAnggaran);
   const [tanggal, setTanggal] = useState(initial?.tanggal || todayISO());
-  const [kategori, setKategori] = useState(initial?.kategori || KATEGORI_PENGELUARAN_LIST[0]);
-  const [subkategori, setSubkategori] = useState(initial?.subkategori || KATEGORI_PENGELUARAN[initial?.kategori || KATEGORI_PENGELUARAN_LIST[0]][0]);
+  const [kategori, setKategori] = useState(initial?.kategori || kategoriList[0]);
+  const [subkategori, setSubkategori] = useState(initial?.subkategori || getSubUntukKategori(posAnggaran, initial?.kategori || kategoriList[0])[0] || "");
   const [keterangan, setKeterangan] = useState(initial?.keterangan || "");
   const [jumlah, setJumlah] = useState(initial?.jumlah ? String(initial.jumlah) : "");
 
   function changeKategori(k) {
     setKategori(k);
-    setSubkategori(KATEGORI_PENGELUARAN[k][0]);
+    setSubkategori(getSubUntukKategori(posAnggaran, k)[0] || "");
   }
 
   return (
     <div style={{ border: `1px solid ${initial ? COLORS.accent : COLORS.divider}`, borderRadius: 12, padding: 16, background: COLORS.bg }}>
       {initial && <div style={{ fontWeight: 700, fontSize: 14, marginBottom: 12 }}>Edit Pengeluaran</div>}
       <form onSubmit={(e) => { e.preventDefault(); if (!keterangan || !jumlah) return; onSubmit({ tanggal, kategori, subkategori, keterangan, jumlah: Number(jumlah) }); }} style={{ display: "grid", gap: 12 }}>
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-          <Field label="Tanggal"><input type="date" value={tanggal} onChange={(e) => setTanggal(e.target.value)} style={inputStyle} /></Field>
-          <Field label="Kategori">
-            <select value={kategori} onChange={(e) => changeKategori(e.target.value)} style={inputStyle}>
-              {KATEGORI_PENGELUARAN_LIST.map((k) => <option key={k} value={k}>{k}</option>)}
-            </select>
-          </Field>
-        </div>
+        <Field label="Tanggal"><input type="date" value={tanggal} onChange={(e) => setTanggal(e.target.value)} style={inputStyle} /></Field>
+        <Field label="Kategori">
+          <select value={kategori} onChange={(e) => changeKategori(e.target.value)} style={inputStyle}>
+            {kategoriList.map((k) => <option key={k} value={k}>{k}</option>)}
+          </select>
+        </Field>
         <Field label="Sub Kategori">
           <select value={subkategori} onChange={(e) => setSubkategori(e.target.value)} style={inputStyle}>
-            {KATEGORI_PENGELUARAN[kategori].map((s) => <option key={s} value={s}>{s}</option>)}
+            {getSubUntukKategori(posAnggaran, kategori).map((s) => <option key={s} value={s}>{s}</option>)}
           </select>
         </Field>
         <Field label="Keterangan"><input value={keterangan} onChange={(e) => setKeterangan(e.target.value)} placeholder="mis. Gaji bulanan — Pak Sandi" style={inputStyle} /></Field>
         <Field label="Jumlah (Rp)"><input type="number" value={jumlah} onChange={(e) => setJumlah(e.target.value)} placeholder="0" style={inputStyle} /></Field>
         <div style={{ display: "flex", gap: 8 }}>
           <Btn type="submit">{initial ? "Simpan Perubahan" : "Simpan Pengeluaran"}</Btn>
-          <Btn type="button" variant="ghost" onClick={onCancel}>Batal</Btn>
-        </div>
-      </form>
-    </div>
-  );
-}
-
-function PemasukanFormInline({ onCancel, onSubmit }) {
-  const [tanggal, setTanggal] = useState(todayISO());
-  const [kategori, setKategori] = useState(KATEGORI_PEMASUKAN_MANUAL[0]);
-  const [keterangan, setKeterangan] = useState("");
-  const [jumlah, setJumlah] = useState("");
-
-  return (
-    <div style={{ border: `1px solid ${COLORS.divider}`, borderRadius: 12, padding: 16, background: COLORS.bg }}>
-      <form onSubmit={(e) => { e.preventDefault(); if (!keterangan || !jumlah) return; onSubmit({ tanggal, kategori, subkategori: null, keterangan, jumlah: Number(jumlah) }); }} style={{ display: "grid", gap: 12 }}>
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-          <Field label="Tanggal"><input type="date" value={tanggal} onChange={(e) => setTanggal(e.target.value)} style={inputStyle} /></Field>
-          <Field label="Kategori">
-            <select value={kategori} onChange={(e) => setKategori(e.target.value)} style={inputStyle}>
-              {KATEGORI_PEMASUKAN_MANUAL.map((k) => <option key={k} value={k}>{k}</option>)}
-            </select>
-          </Field>
-        </div>
-        <Field label="Keterangan"><input value={keterangan} onChange={(e) => setKeterangan(e.target.value)} placeholder="mis. Iuran THR dari warga" style={inputStyle} /></Field>
-        <Field label="Jumlah (Rp)"><input type="number" value={jumlah} onChange={(e) => setJumlah(e.target.value)} placeholder="0" style={inputStyle} /></Field>
-        <div style={{ display: "flex", gap: 8 }}>
-          <Btn type="submit">Simpan Pemasukan</Btn>
           <Btn type="button" variant="ghost" onClick={onCancel}>Batal</Btn>
         </div>
       </form>
@@ -2580,6 +3253,7 @@ function AddUserForm({ warga, pengguna, jabatanOptions, onAddJabatan, onCancel, 
   const [kepemilikan, setKepemilikan] = useState("Pemilik");
 
   const sudahAdaKontakUtama = pengguna.some((p) => p.wargaId === wargaId && p.reminderIPL);
+  const tampilkanRumah = role !== "security";
 
   function handleSubmit(e) {
     e.preventDefault();
@@ -2587,6 +3261,9 @@ function AddUserForm({ warga, pengguna, jabatanOptions, onAddJabatan, onCancel, 
     const data = { nama, hp, role, jabatan: "" };
     if (role === "pengurus") {
       data.jabatan = jabatan || "";
+      data.wargaId = wargaId;
+      data.kepemilikan = kepemilikan;
+      data.reminderIPL = !sudahAdaKontakUtama;
     } else if (role === "warga") {
       data.wargaId = wargaId;
       data.kepemilikan = kepemilikan;
@@ -2615,7 +3292,7 @@ function AddUserForm({ warga, pengguna, jabatanOptions, onAddJabatan, onCancel, 
         </div>
       )}
 
-      {role === "warga" && (
+      {tampilkanRumah && (
         <div style={{ marginBottom: 16 }}>
           <div className="row-3" style={{ marginBottom: 0 }}>
             <Field label="Rumah">
@@ -2659,22 +3336,19 @@ function EditWargaModal({ data: p, warga, pengguna, jabatanOptions, onAddJabatan
 
   const penghuniRumahBaru = pengguna.filter((x) => x.wargaId === wargaId && x.id !== p.id);
   const rumahBaruSudahAdaKontakUtama = penghuniRumahBaru.some((x) => x.reminderIPL);
-  const pindahRumah = role === "warga" && wargaId !== p.wargaId;
+  const tampilkanRumah = role !== "security";
+  const pindahRumah = tampilkanRumah && wargaId !== p.wargaId;
 
   function handleSubmit(e) {
     e.preventDefault();
     if (!nama || !hp) return;
     const data = { nama, hp, role, jabatan: "" };
-    if (role === "pengurus") {
-      data.jabatan = jabatan || "";
-      data.wargaId = undefined;
-      data.kepemilikan = undefined;
-      data.reminderIPL = false;
-    } else if (role === "security") {
+    if (role === "security") {
       data.wargaId = undefined;
       data.kepemilikan = undefined;
       data.reminderIPL = false;
     } else {
+      data.jabatan = role === "pengurus" ? (jabatan || "") : "";
       data.wargaId = wargaId;
       data.kepemilikan = kepemilikan;
       data.reminderIPL = reminderIPL;
@@ -2707,7 +3381,7 @@ function EditWargaModal({ data: p, warga, pengguna, jabatanOptions, onAddJabatan
             </Field>
           )}
 
-          {role === "warga" && (
+          {tampilkanRumah && (
             <>
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
                 <Field label="Rumah">
@@ -2824,8 +3498,8 @@ function KontakDaruratRow({ k, canEdit, onEdit, onDelete }) {
     <div style={{ padding: "10px 0", borderBottom: `1px solid ${COLORS.divider}` }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10 }}>
         <div style={{ minWidth: 0 }}>
-          <div style={{ fontWeight: 600, fontSize: 13.5 }}>{k.nama}</div>
-          {k.ket && <div style={{ fontSize: 12, color: COLORS.inkSoft }}>{k.ket}</div>}
+          <div style={{ fontWeight: 700, fontSize: 13.5, color: COLORS.accent }}>{k.nama}</div>
+          {k.ket && <div style={{ fontSize: 12, color: COLORS.ink }}>{k.ket}</div>}
           <div className="mono" style={{ fontSize: 12.5, color: COLORS.ink, marginTop: 2 }}>{k.hp}</div>
         </div>
         <div style={{ display: "flex", gap: 6, alignItems: "center", flexShrink: 0 }}>
@@ -2863,7 +3537,7 @@ function PerangkatDesaRow({ p, canEdit, onEdit, onDelete }) {
     <div style={{ padding: "10px 0", borderBottom: `1px solid ${COLORS.divider}` }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10 }}>
         <div style={{ minWidth: 0 }}>
-          <div style={{ fontWeight: 700, fontSize: 12, color: COLORS.accent, textTransform: "uppercase", letterSpacing: "0.03em" }}>{p.jabatan}</div>
+          <div style={{ fontWeight: 700, fontSize: 12, color: COLORS.accent }}>{p.jabatan}</div>
           <div style={{ fontWeight: 600, fontSize: 13.5, color: kosong ? COLORS.inkFaint : COLORS.ink }}>{p.nama || "Belum diisi"}</div>
           {p.hp && <div className="mono" style={{ fontSize: 12.5, color: COLORS.ink, marginTop: 2 }}>{p.hp}</div>}
         </div>
