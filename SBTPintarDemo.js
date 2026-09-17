@@ -381,7 +381,7 @@ const seedKegiatan = [
 ];
 
 // ---------- data contoh Log Kejadian (30 hari terakhir + sebagian riwayat lama) ----------
-const KATEGORI_KEJADIAN = ["Pencurian", "Kebakaran", "Gangguan Ketertiban", "Aktivitas Mencurigakan", "Perkelahian/Kekerasan", "Kerusakan Fasilitas", "Kecelakaan", "Kendaraan", "Lainnya"];
+const KATEGORI_KEJADIAN_DEFAULT = ["Pencurian", "Kebakaran", "Gangguan Ketertiban", "Aktivitas Mencurigakan", "Perkelahian/Kekerasan", "Kerusakan Fasilitas", "Kecelakaan", "Kendaraan", "Lainnya"];
 const hariLalu = (n) => toLocalISODate(new Date(new Date().setDate(new Date().getDate() - n)));
 const seedLogKejadian = [
   // --- 30 hari terakhir — "Aktivitas Mencurigakan" sengaja paling banyak dilaporkan ---
@@ -559,7 +559,7 @@ const COLORS = {
 // ============================================================
 // storage
 // ============================================================
-const KEYS = { warga: "sbt:warga:v6", transaksi: "sbt:transaksi:v4", kegiatan: "sbt:kegiatan:v3", pengguna: "sbt:pengguna:v7", logKejadian: "sbt:logkejadian:v4", jabatanOptions: "sbt:jabatanoptions:v1", kontakDarurat: "sbt:kontakdarurat:v2", perangkatDesa: "sbt:perangkatdesa:v2", posAnggaran: "sbt:posanggaran:v1", thrConfig: "sbt:thrconfig:v1", openingConfig: "sbt:openingconfig:v1", permissions: "sbt:permissions:v1" };
+const KEYS = { warga: "sbt:warga:v6", transaksi: "sbt:transaksi:v4", kegiatan: "sbt:kegiatan:v3", pengguna: "sbt:pengguna:v7", logKejadian: "sbt:logkejadian:v4", kategoriKejadian: "sbt:kategorikejadian:v1", jabatanOptions: "sbt:jabatanoptions:v1", kontakDarurat: "sbt:kontakdarurat:v2", perangkatDesa: "sbt:perangkatdesa:v2", posAnggaran: "sbt:posanggaran:v1", thrConfig: "sbt:thrconfig:v1", openingConfig: "sbt:openingconfig:v1", permissions: "sbt:permissions:v1" };
 async function loadKey(key, fallback) {
   try {
     if (typeof window !== "undefined" && window.storage) {
@@ -1095,6 +1095,7 @@ export default function SBTPintar() {
   const [transaksi, setTransaksi] = useState(seedTransaksi);
   const [kegiatan, setKegiatan] = useState(seedKegiatan);
   const [logKejadian, setLogKejadian] = useState(seedLogKejadian);
+  const [kategoriKejadian, setKategoriKejadian] = useState(KATEGORI_KEJADIAN_DEFAULT);
   const [jabatanOptions, setJabatanOptions] = useState(JABATAN_OPTIONS_DEFAULT);
   const [kontakDarurat, setKontakDarurat] = useState(seedKontakDarurat);
   const [perangkatDesa, setPerangkatDesa] = useState(seedPerangkatDesa);
@@ -1152,14 +1153,14 @@ export default function SBTPintar() {
     document.head.appendChild(link);
 
     (async () => {
-      const [w, t, k, p, so, kd, pd, pa, tc, oc, pm, lk] = await Promise.all([
+      const [w, t, k, p, so, kd, pd, pa, tc, oc, pm, lk, kk] = await Promise.all([
         loadKey(KEYS.warga, null), loadKey(KEYS.transaksi, null),
         loadKey(KEYS.kegiatan, null), loadKey(KEYS.pengguna, null),
         loadKey(KEYS.jabatanOptions, null),
         loadKey(KEYS.kontakDarurat, null), loadKey(KEYS.perangkatDesa, null),
         loadKey(KEYS.posAnggaran, null), loadKey(KEYS.thrConfig, null),
         loadKey(KEYS.openingConfig, null), loadKey(KEYS.permissions, null),
-        loadKey(KEYS.logKejadian, null),
+        loadKey(KEYS.logKejadian, null), loadKey(KEYS.kategoriKejadian, null),
       ]);
       if (w) setWarga(w); else saveKey(KEYS.warga, seedWarga);
       if (t) setTransaksi(t); else saveKey(KEYS.transaksi, seedTransaksi);
@@ -1173,6 +1174,7 @@ export default function SBTPintar() {
       if (oc) setOpeningConfig(oc); else saveKey(KEYS.openingConfig, OPENING_CONFIG_DEFAULT);
       if (pm) setPermissions(pm); else saveKey(KEYS.permissions, PERMISSIONS_DEFAULT);
       if (lk) setLogKejadian(lk); else saveKey(KEYS.logKejadian, seedLogKejadian);
+      if (kk) setKategoriKejadian(kk); else saveKey(KEYS.kategoriKejadian, KATEGORI_KEJADIAN_DEFAULT);
       setLoading(false);
     })();
   }, []);
@@ -1400,6 +1402,26 @@ export default function SBTPintar() {
       return next;
     });
     setToast("Status kejadian diperbarui.");
+  };
+  const addKategoriKejadian = (nama) => {
+    const clean = nama.trim();
+    if (!clean || kategoriKejadian.includes(clean)) return;
+    setKategoriKejadian((prev) => { const next = [...prev, clean]; saveKey(KEYS.kategoriKejadian, next); return next; });
+  };
+  const renameKategoriKejadian = (lama, baru) => {
+    const clean = baru.trim();
+    if (!clean || clean === lama || kategoriKejadian.includes(clean)) return;
+    setKategoriKejadian((prev) => { const next = prev.map((k) => k === lama ? clean : k); saveKey(KEYS.kategoriKejadian, next); return next; });
+    setLogKejadian((prev) => {
+      const next = prev.map((l) => l.kategori === lama ? { ...l, kategori: clean } : l);
+      saveKey(KEYS.logKejadian, next);
+      return next;
+    });
+  };
+  const deleteKategoriKejadian = (nama) => {
+    const dipakai = logKejadian.some((l) => l.kategori === nama);
+    if (dipakai) { setToast(`Tidak bisa hapus "${nama}" — masih ada kejadian pakai kategori ini.`); return; }
+    setKategoriKejadian((prev) => { const next = prev.filter((k) => k !== nama); saveKey(KEYS.kategoriKejadian, next); return next; });
   };
 
   // ---- Akses pengguna ----
@@ -2321,6 +2343,7 @@ export default function SBTPintar() {
           {tab === "absensi" && (
             <LogKejadianView
               logKejadian={logKejadian}
+              kategoriKejadian={kategoriKejadian}
               role={role}
               onAddLogKejadian={addLogKejadian}
               onUpdateStatusLogKejadian={updateStatusLogKejadian}
@@ -2433,6 +2456,18 @@ export default function SBTPintar() {
                   onDelete={deleteJabatanOption}
                 />
               </CollapsibleCard>
+
+              <div style={{ marginTop: 18 }}>
+                <CollapsibleCard title="Kelola Kategori Laporan Kejadian" subtitle="Atur daftar kategori di menu Log Kejadian" defaultOpen={false}>
+                  <JabatanOptionsManager
+                    jabatanOptions={kategoriKejadian}
+                    onAdd={addKategoriKejadian}
+                    onRename={renameKategoriKejadian}
+                    onDelete={deleteKategoriKejadian}
+                    placeholder="Tambah kategori baru"
+                  />
+                </CollapsibleCard>
+              </div>
 
               <div style={{ marginTop: 18 }}>
                 <CollapsibleCard title="Kelola Periode THR" subtitle="Atur bulan & tahun iuran THR tahun berjalan (sukarela)" defaultOpen={false}>
@@ -3088,10 +3123,10 @@ function LogKejadianCard({ entry, canTindakLanjut, onUpdateStatus }) {
   );
 }
 
-function LogKejadianForm({ onCancel, onSubmit }) {
+function LogKejadianForm({ onCancel, onSubmit, kategoriList }) {
   const [tanggal, setTanggal] = useState(todayISO());
   const [jam, setJam] = useState(new Date().toTimeString().slice(0, 5));
-  const [kategori, setKategori] = useState(KATEGORI_KEJADIAN[0]);
+  const [kategori, setKategori] = useState(kategoriList[0]);
   const [deskripsi, setDeskripsi] = useState("");
 
   function handleSubmit(e) {
@@ -3109,7 +3144,7 @@ function LogKejadianForm({ onCancel, onSubmit }) {
       <div style={{ marginBottom: 12 }}>
         <Field label="Kategori">
           <select value={kategori} onChange={(e) => setKategori(e.target.value)} style={inputStyle}>
-            {KATEGORI_KEJADIAN.map((k) => <option key={k} value={k}>{k}</option>)}
+            {kategoriList.map((k) => <option key={k} value={k}>{k}</option>)}
           </select>
         </Field>
       </div>
@@ -3156,7 +3191,7 @@ function DistribusiKategoriMini({ data, activeKategori, onSelectKategori }) {
   );
 }
 
-function LogKejadianView({ logKejadian, role, onAddLogKejadian, onUpdateStatusLogKejadian }) {
+function LogKejadianView({ logKejadian, kategoriKejadian, role, onAddLogKejadian, onUpdateStatusLogKejadian }) {
   const [showLogForm, setShowLogForm] = useState(false);
   const [viewScope, setViewScope] = useState("30hari");
   const [filterStatus, setFilterStatus] = useState(null); // null | "baru" | "ditindaklanjuti"
@@ -3197,7 +3232,7 @@ function LogKejadianView({ logKejadian, role, onAddLogKejadian, onUpdateStatusLo
       {showLogForm && (
         <div style={{ position: "fixed", inset: 0, background: "rgba(29,29,31,0.5)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 80, padding: 16 }}>
           <div style={{ width: "100%", maxWidth: 420, maxHeight: "88vh", overflowY: "auto" }}>
-            <LogKejadianForm onCancel={() => setShowLogForm(false)} onSubmit={(data) => { onAddLogKejadian(data); setShowLogForm(false); }} />
+            <LogKejadianForm kategoriList={kategoriKejadian} onCancel={() => setShowLogForm(false)} onSubmit={(data) => { onAddLogKejadian(data); setShowLogForm(false); }} />
           </div>
         </div>
       )}
@@ -3275,7 +3310,7 @@ function LogKejadianView({ logKejadian, role, onAddLogKejadian, onUpdateStatusLo
 // ============================================================
 // komponen lain
 // ============================================================
-function JabatanOptionsManager({ jabatanOptions, onAdd, onRename, onDelete }) {
+function JabatanOptionsManager({ jabatanOptions, onAdd, onRename, onDelete, placeholder }) {
   const [newLabel, setNewLabel] = useState("");
   const [editing, setEditing] = useState(null);
   const [editValue, setEditValue] = useState("");
@@ -3302,7 +3337,7 @@ function JabatanOptionsManager({ jabatanOptions, onAdd, onRename, onDelete }) {
         ))}
       </div>
       <div style={{ display: "flex", gap: 6 }}>
-        <input value={newLabel} onChange={(e) => setNewLabel(e.target.value)} placeholder="Tambah status baru" style={{ ...inputStyle, padding: "8px 10px", fontSize: 12.5, flex: 1 }} />
+        <input value={newLabel} onChange={(e) => setNewLabel(e.target.value)} placeholder={placeholder || "Tambah status baru"} style={{ ...inputStyle, padding: "8px 10px", fontSize: 12.5, flex: 1 }} />
         <Btn onClick={() => { onAdd(newLabel); setNewLabel(""); }} style={{ padding: "8px 14px", fontSize: 12.5 }}><Plus size={13} /> Tambah</Btn>
       </div>
     </div>
